@@ -27,7 +27,7 @@ async fn start() {
             Event::WindowEvent {
                 ref event,
                 window_id,
-            } if window_id == renderer.window().id() => match event {
+            } if window_id == renderer.window().id() && !renderer.input(event) => match event {
                 WindowEvent::CloseRequested => elwt.exit(),
 
                 WindowEvent::KeyboardInput {
@@ -38,8 +38,8 @@ async fn start() {
                             ..
                         },
                     ..
-                } if !renderer.input(event) => {}
-                WindowEvent::RedrawRequested => {
+                }
+                | WindowEvent::RedrawRequested => {
                     renderer.update();
                     match renderer.render() {
                         Ok(_) => {}
@@ -52,7 +52,6 @@ async fn start() {
                     }
                 }
                 WindowEvent::Resized(size) => renderer.resize(*size),
-
                 _ => {}
             },
             _ => {}
