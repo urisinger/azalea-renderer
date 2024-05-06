@@ -24,8 +24,6 @@ mod world;
 pub struct Renderer<'a> {
     state: State<'a>,
 
-    world: World,
-
     world_renderer: WorldRenderer,
 
     projection: Projection,
@@ -66,7 +64,6 @@ impl<'a> Renderer<'a> {
 
         Self {
             state,
-            world,
             world_renderer,
             camera,
             projection,
@@ -133,7 +130,7 @@ impl<'a> Renderer<'a> {
                     label: Some("Main Render"),
                 });
 
-        self.world_renderer.draw(&mut encoder, &self.world, &view);
+        self.world_renderer.draw(&mut encoder, &view);
 
         self.state.queue.submit(std::iter::once(encoder.finish()));
         output.present();

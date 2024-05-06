@@ -251,12 +251,7 @@ impl WorldRenderer {
         );
     }
 
-    pub fn draw<'a>(
-        &'a self,
-        encoder: &mut wgpu::CommandEncoder,
-        world: &'a World,
-        view: &wgpu::TextureView,
-    ) {
+    pub fn draw<'a>(&'a self, encoder: &mut wgpu::CommandEncoder, view: &wgpu::TextureView) {
         let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("Main Pass"),
             color_attachments: &[Some(wgpu::RenderPassColorAttachment {
@@ -287,23 +282,18 @@ impl WorldRenderer {
         render_pass.set_pipeline(&self.main_pipeline);
         render_pass.set_bind_group(0, &self.global_bind_group, &[]);
 
-        let mut i = true;
-        for (pos, chunk) in &world.chunks {
-            if i {
-                render_pass.set_push_constants(
-                    wgpu::ShaderStages::VERTEX,
-                    0,
-                    bytemuck::cast_slice(&pos.to_array()),
-                );
+        for (pos, chunk) in &self.world.chunks {
+            render_pass.set_push_constants(
+                wgpu::ShaderStages::VERTEX,
+                0,
+                bytemuck::cast_slice(&pos.to_array()),
+            );
 
-                render_pass.set_bind_group(1, &chunk.bind_group, &[]);
+            render_pass.set_bind_group(1, &chunk.bind_group, &[]);
 
-                render_pass.set_vertex_buffer(0, chunk.vertex_buffer.slice(..));
-                render_pass
-                    .set_index_buffer(chunk.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
-                render_pass.draw_indexed(0..chunk.len, 0, 0..1);
-                i = false;
-            }
+            render_pass.set_vertex_buffer(0, chunk.vertex_buffer.slice(..));
+            render_pass.set_index_buffer(chunk.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
+            render_pass.draw_indexed(0..chunk.len, 0, 0..1);
         }
     }
 }
