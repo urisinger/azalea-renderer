@@ -38,7 +38,7 @@ impl<'a> State<'a> {
         let (device, queue) = adapter
             .request_device(
                 &wgpu::DeviceDescriptor {
-                    required_features: wgpu::Features::empty(),
+                    required_features: wgpu::Features::SPIRV_SHADER_PASSTHROUGH,
                     required_limits: wgpu::Limits::default(),
                     label: None,
                 },

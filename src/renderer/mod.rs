@@ -1,20 +1,17 @@
-use std::{fs, io::BufReader, sync::Arc, time::Duration};
+use std::{sync::Arc, time::Duration};
 
 use azalea::{core::position::ChunkPos, world::Chunk};
 use state::State;
 use winit::{
     event::{KeyEvent, WindowEvent},
     keyboard::PhysicalKey,
-    window::{CursorGrabMode, Window},
+    window::Window,
 };
 
 use chunk::Vertex;
-use log::*;
 
 use self::{
     camera::{Camera, CameraController, Projection},
-    chunk::RenderChunk,
-    texture::Texture,
     world::{World, WorldRenderer},
 };
 
@@ -23,17 +20,6 @@ mod chunk;
 mod state;
 mod texture;
 mod world;
-
-#[rustfmt::skip]
-const VERTICES: &[Vertex] = &[
-    Vertex { position: [-0.0868241, 0.49240386, 0.0], tex_coords: [0.4131759, 0.99240386], }, // A
-    Vertex { position: [-0.49513406, 0.06958647, 0.0], tex_coords: [0.0048659444, 0.56958647], }, // B
-    Vertex { position: [-0.21918549, -0.44939706, 0.0], tex_coords: [0.28081453, 0.05060294], }, // C
-    Vertex { position: [0.35966998, -0.3473291, 0.0], tex_coords: [0.85967, 0.1526709], }, // D
-    Vertex { position: [0.44147372, 0.2347359, 0.0], tex_coords: [0.9414737, 0.7347359], }, // E
-];
-
-const INDICES: &[u16] = &[0, 1, 4, 1, 2, 4, 2, 3, 4];
 
 pub struct Renderer<'a> {
     state: State<'a>,
@@ -94,6 +80,8 @@ impl<'a> Renderer<'a> {
         self.state.resize(new_size);
         self.world_renderer
             .resize(&self.state.device, &self.state.main_window.config);
+        self.projection
+            .resize(new_size.width as f32, new_size.height as f32);
     }
 
     pub fn size(&self) -> winit::dpi::PhysicalSize<u32> {

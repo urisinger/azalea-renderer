@@ -1,4 +1,4 @@
-use std::{collections::HashMap, fs, io::BufReader, num::NonZero};
+use std::{collections::HashMap, fs, io::BufReader, num::NonZeroU64};
 
 use azalea::{core::position::ChunkPos, world::Chunk};
 
@@ -47,7 +47,9 @@ impl WorldRenderer {
         queue: &wgpu::Queue,
         config: &wgpu::SurfaceConfiguration,
     ) -> Result<Self, image::ImageError> {
-        let shader = device.create_shader_module(wgpu::include_wgsl!("shaders.wgsl"));
+        let shader = unsafe {
+            device.create_shader_module_spirv(&wgpu::include_spirv_raw!(env!("shaders.spv")))
+        };
 
         let diffuse_texture = Texture::new(
             &device,
@@ -123,7 +125,7 @@ impl WorldRenderer {
                     resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
                         buffer: &world_uniform_buffer,
                         offset: 0,
-                        size: NonZero::new(world_uniform_buffer.size()),
+                        size: NonZeroU64::new(world_uniform_buffer.size()),
                     }),
                 },
                 wgpu::BindGroupEntry {
@@ -150,12 +152,12 @@ impl WorldRenderer {
             layout: Some(&render_pipeline_layout),
             vertex: wgpu::VertexState {
                 module: &shader,
-                entry_point: "vs_main",
+                entry_point: "main_vs",
                 buffers: &[Vertex::desc()],
             },
             fragment: Some(wgpu::FragmentState {
                 module: &shader,
-                entry_point: "fs_main",
+                entry_point: "main_fs",
                 targets: &[Some(wgpu::ColorTargetState {
                     format: config.format,
                     blend: Some(wgpu::BlendState::REPLACE),
@@ -285,18 +287,23 @@ impl WorldRenderer {
         render_pass.set_pipeline(&self.main_pipeline);
         render_pass.set_bind_group(0, &self.global_bind_group, &[]);
 
+        let mut i = true;
         for (pos, chunk) in &world.chunks {
-            render_pass.set_push_constants(
-                wgpu::ShaderStages::VERTEX,
-                0,
-                bytemuck::cast_slice(&pos.to_array()),
-            );
+            if i {
+                render_pass.set_push_constants(
+                    wgpu::ShaderStages::VERTEX,
+                    0,
+                    bytemuck::cast_slice(&pos.to_array()),
+                );
 
-            render_pass.set_bind_group(1, &chunk.bind_group, &[]);
+                render_pass.set_bind_group(1, &chunk.bind_group, &[]);
 
-            render_pass.set_vertex_buffer(0, chunk.vertex_buffer.slice(..));
-            render_pass.set_index_buffer(chunk.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
-            render_pass.draw_indexed(0..chunk.len, 0, 0..1);
+                render_pass.set_vertex_buffer(0, chunk.vertex_buffer.slice(..));
+                render_pass
+                    .set_index_buffer(chunk.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
+                render_pass.draw_indexed(0..chunk.len, 0, 0..1);
+                i = false;
+            }
         }
     }
 }
