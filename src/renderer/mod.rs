@@ -1,11 +1,18 @@
-use std::{fs, io::BufReader};
+use std::{fs, io::BufReader, sync::Arc, time::Duration};
 
+use azalea::{core::position::ChunkPos, world::Chunk};
 use state::State;
-use winit::{event::WindowEvent, window::Window};
+use winit::{
+    event::{KeyEvent, WindowEvent},
+    keyboard::PhysicalKey,
+    window::{CursorGrabMode, Window},
+};
 
 use chunk::Vertex;
+use log::*;
 
 use self::{
+    camera::{Camera, CameraController, Projection},
     chunk::RenderChunk,
     texture::Texture,
     world::{World, WorldRenderer},
@@ -34,29 +41,59 @@ pub struct Renderer<'a> {
     world: World,
 
     world_renderer: WorldRenderer,
+
+    projection: Projection,
+    camera: Camera,
+
+    pub camera_controller: CameraController,
+
+    reciver: flume::Receiver<(ChunkPos, Arc<parking_lot::RwLock<Chunk>>)>,
 }
 
 impl<'a> Renderer<'a> {
-    pub async fn new(window: &'a Window) -> Self {
+    pub async fn new(
+        window: &'a Window,
+        reciver: flume::Receiver<(ChunkPos, Arc<parking_lot::RwLock<Chunk>>)>,
+    ) -> Self {
         let state = State::new_async(window).await;
 
-        let chunk = RenderChunk::from_vertex_index(&state.device, VERTICES, INDICES);
-
-        let mut world = World::new();
-        world.add_chunk(chunk);
+        let world = World::new();
 
         let world_renderer =
-            WorldRenderer::new(&state.device, &state.queue, state.main_window.config.format)
-                .unwrap();
+            WorldRenderer::new(&state.device, &state.queue, &state.main_window.config).unwrap();
+
+        let camera_controller = CameraController::new(15.0, 0.5);
+
+        let camera = Camera::new(
+            (0.0, 5.0, 10.0),
+            -90.0_f32.to_radians(),
+            -20.0_f32.to_radians(),
+        );
+
+        let projection = Projection::new(
+            state.main_window.config.width,
+            state.main_window.config.height,
+            45.0_f32.to_radians(),
+            0.1,
+            100.0,
+        );
+
         Self {
             state,
             world,
             world_renderer,
+            camera,
+            projection,
+            camera_controller,
+
+            reciver,
         }
     }
 
     pub fn resize(&mut self, new_size: winit::dpi::PhysicalSize<u32>) {
-        self.state.resize(new_size)
+        self.state.resize(new_size);
+        self.world_renderer
+            .resize(&self.state.device, &self.state.main_window.config);
     }
 
     pub fn size(&self) -> winit::dpi::PhysicalSize<u32> {
@@ -64,12 +101,37 @@ impl<'a> Renderer<'a> {
     }
 
     pub fn input(&mut self, event: &WindowEvent) -> bool {
-        false
+        match event {
+            WindowEvent::KeyboardInput {
+                event:
+                    KeyEvent {
+                        physical_key: PhysicalKey::Code(key),
+                        state,
+                        ..
+                    },
+                ..
+            } => self.camera_controller.process_keyboard(*key, *state),
+            WindowEvent::MouseWheel { delta, .. } => {
+                self.camera_controller.process_scroll(delta);
+                true
+            }
+            _ => false,
+        }
     }
 
-    pub fn update(&mut self) {}
+    pub fn update(&mut self, dt: Duration) {
+        while let Ok((pos, chunk)) = self.reciver.try_recv() {
+            self.world_renderer
+                .add_chunk(&self.state.device, &pos, &chunk.read());
+        }
+        self.camera_controller.update_camera(&mut self.camera, dt);
+        self.world_renderer
+            .set_camera(self.projection.calc_matrix() * self.camera.calc_matrix());
+        self.world_renderer.update(&self.state.queue);
+    }
 
     pub fn render(&mut self) -> Result<(), wgpu::SurfaceError> {
+        println!("rendered");
         let output = self.state.main_window.surface.get_current_texture()?;
 
         let view = output
@@ -82,29 +144,8 @@ impl<'a> Renderer<'a> {
                 .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                     label: Some("Main Render"),
                 });
-        {
-            let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("Main Pass"),
-                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: &view,
-                    resolve_target: None,
-                    ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(wgpu::Color {
-                            r: 0.1,
-                            g: 0.2,
-                            b: 0.3,
-                            a: 1.0,
-                        }),
-                        store: wgpu::StoreOp::Store,
-                    },
-                })],
-                depth_stencil_attachment: None,
-                occlusion_query_set: None,
-                timestamp_writes: None,
-            });
 
-            self.world_renderer.draw(&mut render_pass, &self.world);
-        }
+        self.world_renderer.draw(&mut encoder, &self.world, &view);
 
         self.state.queue.submit(std::iter::once(encoder.finish()));
         output.present();

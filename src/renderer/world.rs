@@ -1,4 +1,6 @@
-use std::{fs, io::BufReader};
+use std::{collections::HashMap, fs, io::BufReader, num::NonZero};
+
+use azalea::{core::position::ChunkPos, world::Chunk};
 
 use super::{
     chunk::{RenderChunk, Vertex},
@@ -6,32 +8,44 @@ use super::{
 };
 
 pub struct World {
-    chunks: Vec<RenderChunk>,
+    chunks: HashMap<glam::IVec3, RenderChunk>,
 }
 
 impl World {
     pub fn new() -> Self {
-        Self { chunks: vec![] }
-    }
-
-    pub fn add_chunk(&mut self, chunk: RenderChunk) {
-        self.chunks.push(chunk)
+        Self {
+            chunks: HashMap::new(),
+        }
     }
 }
 
+#[repr(C)]
+#[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
+pub struct WorldUniform {
+    camera: [[f32; 4]; 4],
+}
+
 pub struct WorldRenderer {
-    render_bind_group: wgpu::BindGroup,
+    global_bind_group: wgpu::BindGroup,
+    chunk_bind_layout: wgpu::BindGroupLayout,
 
     main_pipeline: wgpu::RenderPipeline,
+    world_uniform_buffer: wgpu::Buffer,
+    world_uniform: WorldUniform,
+    depth: Texture,
+
+    world: World,
 
     diffuse_texture: Texture,
 }
 
 impl WorldRenderer {
+    const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
+
     pub fn new(
         device: &wgpu::Device,
         queue: &wgpu::Queue,
-        window_format: wgpu::TextureFormat,
+        config: &wgpu::SurfaceConfiguration,
     ) -> Result<Self, image::ImageError> {
         let shader = device.create_shader_module(wgpu::include_wgsl!("shaders.wgsl"));
 
@@ -41,11 +55,32 @@ impl WorldRenderer {
             BufReader::new(fs::File::open(env!("TEXTURE_PATH")).unwrap()),
         )?;
 
+        let world_uniform_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("World Uniform"),
+            size: core::mem::size_of::<WorldUniform>() as u64,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+
+        let world_uniform = WorldUniform {
+            camera: glam::Mat4::IDENTITY.to_cols_array_2d(),
+        };
+
         let texture_bind_group_layout =
             device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
                 entries: &[
                     wgpu::BindGroupLayoutEntry {
                         binding: 0,
+                        visibility: wgpu::ShaderStages::VERTEX,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Uniform,
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 1,
                         visibility: wgpu::ShaderStages::FRAGMENT,
                         ty: wgpu::BindingType::Texture {
                             multisampled: false,
@@ -55,7 +90,7 @@ impl WorldRenderer {
                         count: None,
                     },
                     wgpu::BindGroupLayoutEntry {
-                        binding: 1,
+                        binding: 2,
                         visibility: wgpu::ShaderStages::FRAGMENT,
                         // This should match the filterable field of the
                         // corresponding Texture entry above.
@@ -66,15 +101,37 @@ impl WorldRenderer {
                 label: Some("diffuse_bind_group_layout"),
             });
 
-        let render_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+        let chunk_bind_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            entries: &[wgpu::BindGroupLayoutEntry {
+                binding: 0,
+                visibility: wgpu::ShaderStages::VERTEX,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Uniform,
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
+                count: None,
+            }],
+            label: None,
+        });
+
+        let global_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             layout: &texture_bind_group_layout,
             entries: &[
                 wgpu::BindGroupEntry {
                     binding: 0,
-                    resource: wgpu::BindingResource::TextureView(&diffuse_texture.view),
+                    resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+                        buffer: &world_uniform_buffer,
+                        offset: 0,
+                        size: NonZero::new(world_uniform_buffer.size()),
+                    }),
                 },
                 wgpu::BindGroupEntry {
                     binding: 1,
+                    resource: wgpu::BindingResource::TextureView(&diffuse_texture.view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
                     resource: wgpu::BindingResource::Sampler(&diffuse_texture.sampler),
                 },
             ],
@@ -84,7 +141,7 @@ impl WorldRenderer {
         let render_pipeline_layout =
             device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                 label: Some("Render Pipeline Layout"),
-                bind_group_layouts: &[&texture_bind_group_layout],
+                bind_group_layouts: &[&texture_bind_group_layout, &chunk_bind_layout],
                 push_constant_ranges: &[],
             });
 
@@ -100,7 +157,7 @@ impl WorldRenderer {
                 module: &shader,
                 entry_point: "fs_main",
                 targets: &[Some(wgpu::ColorTargetState {
-                    format: window_format,
+                    format: config.format,
                     blend: Some(wgpu::BlendState::REPLACE),
                     write_mask: wgpu::ColorWrites::ALL,
                 })],
@@ -109,7 +166,7 @@ impl WorldRenderer {
                 topology: wgpu::PrimitiveTopology::TriangleList,
                 strip_index_format: None,
                 front_face: wgpu::FrontFace::Ccw,
-                cull_mode: Some(wgpu::Face::Back),
+                cull_mode: None,
                 // Setting this to anything other than Fill requires Features::NON_FILL_POLYGON_MODE
                 polygon_mode: wgpu::PolygonMode::Fill,
                 // Requires Features::DEPTH_CLIP_CONTROL
@@ -117,7 +174,13 @@ impl WorldRenderer {
                 // Requires Features::CONSERVATIVE_RASTERIZATION
                 conservative: false,
             },
-            depth_stencil: None,
+            depth_stencil: Some(wgpu::DepthStencilState {
+                format: Self::DEPTH_FORMAT,
+                depth_write_enabled: true,
+                depth_compare: wgpu::CompareFunction::Less, // 1.
+                stencil: wgpu::StencilState::default(),     // 2.
+                bias: wgpu::DepthBiasState::default(),
+            }),
             multisample: wgpu::MultisampleState {
                 count: 1,
                 mask: !0,
@@ -126,19 +189,111 @@ impl WorldRenderer {
             multiview: None,
         });
 
+        let depth = Texture::new_depth(
+            device,
+            wgpu::Extent3d {
+                width: config.width,
+                height: config.height,
+                depth_or_array_layers: 1,
+            },
+            Self::DEPTH_FORMAT,
+        );
+
         Ok(Self {
             main_pipeline: pipeline,
+            chunk_bind_layout,
+            global_bind_group,
+            world: World::new(),
 
-            render_bind_group,
+            world_uniform,
+            world_uniform_buffer,
+            depth,
 
             diffuse_texture,
         })
     }
 
-    pub fn draw<'a>(&'a self, render_pass: &mut wgpu::RenderPass<'a>, world: &'a World) {
-        for chunk in &world.chunks {
-            render_pass.set_pipeline(&self.main_pipeline);
-            render_pass.set_bind_group(0, &self.render_bind_group, &[]);
+    pub fn set_camera(&mut self, camera: glam::Mat4) {
+        self.world_uniform.camera = camera.to_cols_array_2d();
+    }
+
+    pub fn resize(&mut self, device: &wgpu::Device, config: &wgpu::SurfaceConfiguration) {
+        self.depth = Texture::new_depth(
+            device,
+            wgpu::Extent3d {
+                width: config.width,
+                height: config.height,
+                depth_or_array_layers: 1,
+            },
+            Self::DEPTH_FORMAT,
+        );
+    }
+
+    pub fn add_chunk(&mut self, device: &wgpu::Device, pos: &ChunkPos, chunk: &Chunk) {
+        let mut y = 0;
+        for section in &chunk.sections {
+            let pos = glam::IVec3::new(pos.x * 16, y, pos.z * 16);
+            let render_chunk =
+                RenderChunk::from_section(device, &self.chunk_bind_layout, section, pos);
+
+            self.world.chunks.insert(pos, render_chunk);
+            y += 16;
+        }
+    }
+
+    pub fn update(&mut self, queue: &wgpu::Queue) {
+        queue.write_buffer(
+            &self.world_uniform_buffer,
+            0,
+            bytemuck::cast_slice(&[self.world_uniform]),
+        );
+    }
+
+    pub fn draw<'a>(
+        &'a self,
+        encoder: &mut wgpu::CommandEncoder,
+        world: &'a World,
+        view: &wgpu::TextureView,
+    ) {
+        let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some("Main Pass"),
+            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                view,
+                resolve_target: None,
+                ops: wgpu::Operations {
+                    load: wgpu::LoadOp::Clear(wgpu::Color {
+                        r: 0.0,
+                        g: 0.0,
+                        b: 0.0,
+                        a: 1.0,
+                    }),
+                    store: wgpu::StoreOp::Store,
+                },
+            })],
+            depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                view: &self.depth.view,
+                depth_ops: Some(wgpu::Operations {
+                    load: wgpu::LoadOp::Clear(1.0),
+                    store: wgpu::StoreOp::Store,
+                }),
+                stencil_ops: None,
+            }),
+            occlusion_query_set: None,
+            timestamp_writes: None,
+        });
+
+        render_pass.set_pipeline(&self.main_pipeline);
+        render_pass.set_bind_group(0, &self.global_bind_group, &[]);
+
+        for (pos, chunk) in &world.chunks {
+            render_pass.set_push_constants(
+                wgpu::ShaderStages::VERTEX,
+                0,
+                bytemuck::cast_slice(&pos.to_array()),
+            );
+
+            render_pass.set_bind_group(1, &chunk.bind_group, &[]);
+
             render_pass.set_vertex_buffer(0, chunk.vertex_buffer.slice(..));
             render_pass.set_index_buffer(chunk.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
             render_pass.draw_indexed(0..chunk.len, 0, 0..1);

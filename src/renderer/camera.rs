@@ -6,6 +6,14 @@ use winit::{
     keyboard::KeyCode,
 };
 
+#[rustfmt::skip]
+pub const OPENGL_TO_WGPU_MATRIX: glam::Mat4 = glam::Mat4::from_cols_array(&[
+    1.0, 0.0, 0.0, 0.0,
+    0.0, 1.0, 0.0, 0.0,
+    0.0, 0.0, 0.5, 0.5,
+    0.0, 0.0, 0.0, 1.0,]
+);
+
 use glam::Vec3Swizzles;
 #[derive(Copy, Clone, Debug)]
 pub struct Camera {
@@ -64,12 +72,9 @@ impl Projection {
     }
 
     pub fn calc_matrix(&self) -> glam::Mat4 {
-        let mut prespective =
-            glam::Mat4::perspective_rh(self.fovy, self.aspect, self.znear, self.zfar);
+        let prespective = glam::Mat4::perspective_rh(self.fovy, self.aspect, self.znear, self.zfar);
 
-        prespective.col_mut(1).y *= -1.0;
-
-        prespective
+        OPENGL_TO_WGPU_MATRIX * prespective
     }
 }
 
@@ -105,7 +110,7 @@ impl CameraController {
         }
     }
 
-    pub fn process_keyboard(&mut self, key: KeyCode, state: ElementState) {
+    pub fn process_keyboard(&mut self, key: KeyCode, state: ElementState) -> bool {
         let amount = if state == ElementState::Pressed {
             1.0
         } else {
@@ -115,23 +120,29 @@ impl CameraController {
         match key {
             KeyCode::KeyW | KeyCode::ArrowUp => {
                 self.amount_forward = amount;
+                true
             }
             KeyCode::KeyS | KeyCode::ArrowDown => {
                 self.amount_backward = amount;
+                true
             }
             KeyCode::KeyA | KeyCode::ArrowLeft => {
                 self.amount_left = amount;
+                true
             }
             KeyCode::KeyD | KeyCode::ArrowRight => {
                 self.amount_right = amount;
+                true
             }
             KeyCode::Space => {
                 self.amount_up = amount;
+                true
             }
             KeyCode::ShiftLeft => {
                 self.amount_down = amount;
+                true
             }
-            _ => (),
+            _ => false,
         }
     }
 

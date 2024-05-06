@@ -1,0 +1,3 @@
+[submodule "azalea-render-fork"]
+	path = azalea-render-fork
+	url = git@github.com:urisinger/azalea-render-fork.git
