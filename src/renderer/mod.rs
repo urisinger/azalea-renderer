@@ -116,7 +116,6 @@ impl<'a> Renderer<'a> {
     }
 
     pub fn render(&mut self) -> Result<(), wgpu::SurfaceError> {
-        println!("rendered");
         let output = self.state.main_window.surface.get_current_texture()?;
 
         let view = output

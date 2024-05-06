@@ -3,7 +3,7 @@ use spirv_std::*;
 
 #[repr(C)]
 pub struct WorldUniform {
-    view_proj: [[f32; 4]; 4],
+    view_proj: glam::Mat4,
 }
 
 #[repr(C)]
@@ -24,7 +24,7 @@ pub fn main_vs(
     #[spirv(uniform, descriptor_set = 1, binding = 0)] chunk_uniform: &ChunkUniform,
 ) {
     *out_uv = in_uv;
-    *out_pos = world_uniform.view_proj.into() * (in_pos).extend(1.0);
+    *out_pos = world_uniform.view_proj * (in_pos + chunk_uniform.pos.as_vec3() * 16.0).extend(1.0);
 }
 
 #[spirv(fragment)]
@@ -33,7 +33,7 @@ pub fn main_fs(
 
     in_uv: glam::Vec2,
 
-    #[spirv(descriptor_set = 0, binding = 1)] texture: &Image!(2D, type=f32, sampled),
+    #[spirv(descriptor_set = 0, binding = 1)] texture: &Image!(2D, type=f32),
     #[spirv(descriptor_set = 0, binding = 2)] sampler: &Sampler,
 ) {
     *out = texture.sample(*sampler, in_uv);

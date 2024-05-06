@@ -10,12 +10,8 @@ fn main() {
         "/home/uri_singer/Downloads/cobblestone.png"
     );
 
-    for env in std::env::vars() {
-        println!("{}={}\n", env.0, env.1);
-    }
-
     std::env::set_current_dir(concat!(env!("CARGO_MANIFEST_DIR"), "/shaders")).unwrap();
-    let mut child = Command::new("cargo")
+    Command::new("cargo")
         .args(["rustc", "--", "--emit", "link=shaders.json"])
         .env_remove("CARGO_ENCODED_RUSTFLAGS")
         .env_remove("RUSTUP_TOOLCHAIN")
@@ -24,7 +20,9 @@ fn main() {
         .env_remove("RUSTDOC")
         .env_remove("LD_LIBRARY_PATH")
         .spawn()
-        .expect("failed to spawn command");
+        .expect("failed to spawn command")
+        .wait()
+        .unwrap();
 
     let shader_path = concat!(env!("CARGO_MANIFEST_DIR"), "/shaders", "/shaders");
 

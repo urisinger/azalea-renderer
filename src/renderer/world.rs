@@ -234,12 +234,12 @@ impl WorldRenderer {
     pub fn add_chunk(&mut self, device: &wgpu::Device, pos: &ChunkPos, chunk: &Chunk) {
         let mut y = 0;
         for section in &chunk.sections {
-            let pos = glam::IVec3::new(pos.x * 16, y, pos.z * 16);
+            let pos = glam::IVec3::new(pos.x, y, pos.z);
             let render_chunk =
                 RenderChunk::from_section(device, &self.chunk_bind_layout, section, pos);
 
             self.world.chunks.insert(pos, render_chunk);
-            y += 16;
+            y += 1;
         }
     }
 
@@ -282,13 +282,7 @@ impl WorldRenderer {
         render_pass.set_pipeline(&self.main_pipeline);
         render_pass.set_bind_group(0, &self.global_bind_group, &[]);
 
-        for (pos, chunk) in &self.world.chunks {
-            render_pass.set_push_constants(
-                wgpu::ShaderStages::VERTEX,
-                0,
-                bytemuck::cast_slice(&pos.to_array()),
-            );
-
+        for (_, chunk) in &self.world.chunks {
             render_pass.set_bind_group(1, &chunk.bind_group, &[]);
 
             render_pass.set_vertex_buffer(0, chunk.vertex_buffer.slice(..));
