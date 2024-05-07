@@ -33,7 +33,7 @@ pub fn main_fs(
 
     in_uv: glam::Vec2,
 
-    #[spirv(descriptor_set = 0, binding = 1)] texture: &Image!(2D, type=f32),
+    #[spirv(descriptor_set = 0, binding = 1)] texture: &Image!(2D, type=f32, sampled),
     #[spirv(descriptor_set = 0, binding = 2)] sampler: &Sampler,
 ) {
     *out = texture.sample(*sampler, in_uv);

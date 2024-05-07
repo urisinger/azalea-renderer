@@ -8,11 +8,9 @@ use winit::{
     window::Window,
 };
 
-use chunk::Vertex;
-
 use self::{
     camera::{Camera, CameraController, Projection},
-    world::{World, WorldRenderer},
+    world::WorldRenderer,
 };
 
 mod camera;
@@ -40,8 +38,6 @@ impl<'a> Renderer<'a> {
         reciver: flume::Receiver<(ChunkPos, Arc<parking_lot::RwLock<Chunk>>)>,
     ) -> Self {
         let state = State::new_async(window).await;
-
-        let world = World::new();
 
         let world_renderer =
             WorldRenderer::new(&state.device, &state.queue, &state.main_window.config).unwrap();

@@ -168,7 +168,7 @@ impl WorldRenderer {
                 topology: wgpu::PrimitiveTopology::TriangleList,
                 strip_index_format: None,
                 front_face: wgpu::FrontFace::Ccw,
-                cull_mode: None,
+                cull_mode: Some(wgpu::Face::Back),
                 // Setting this to anything other than Fill requires Features::NON_FILL_POLYGON_MODE
                 polygon_mode: wgpu::PolygonMode::Fill,
                 // Requires Features::DEPTH_CLIP_CONTROL
@@ -283,11 +283,24 @@ impl WorldRenderer {
         render_pass.set_bind_group(0, &self.global_bind_group, &[]);
 
         for (_, chunk) in &self.world.chunks {
-            render_pass.set_bind_group(1, &chunk.bind_group, &[]);
+            if chunk.index_buffer.size() > 20 {
+                render_pass.set_bind_group(
+                    1,
+                    &self
+                        .world
+                        .chunks
+                        .get(&glam::IVec3 { x: 0, y: 0, z: 0 })
+                        .unwrap_or(chunk)
+                        .bind_group,
+                    &[],
+                );
 
-            render_pass.set_vertex_buffer(0, chunk.vertex_buffer.slice(..));
-            render_pass.set_index_buffer(chunk.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
-            render_pass.draw_indexed(0..chunk.len, 0, 0..1);
+                render_pass.set_vertex_buffer(0, chunk.vertex_buffer.slice(..));
+                render_pass
+                    .set_index_buffer(chunk.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
+                render_pass.draw_indexed(0..chunk.len, 0, 0..1);
+                break;
+            }
         }
     }
 }

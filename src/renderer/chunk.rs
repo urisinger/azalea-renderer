@@ -1,6 +1,9 @@
 use std::{num::NonZeroU64, ops::Add};
 
-use azalea::{core::position::ChunkSectionBlockPos, world::Section};
+use azalea::{
+    core::{direction::Direction, position::ChunkSectionBlockPos},
+    world::Section,
+};
 use wgpu::util::DeviceExt;
 
 #[repr(C)]
@@ -33,121 +36,138 @@ pub struct RenderChunk {
     pub len: u32,
 }
 
-const FACES: [[Vertex; 4]; 6] = [
-    //top(+y)
-    [
-        Vertex {
-            position: [0.0, 1.0, 0.0],
-            tex_coords: [0.0, 0.0],
-        },
-        Vertex {
-            position: [0.0, 1.0, 1.0],
-            tex_coords: [0.0, 1.0],
-        },
-        Vertex {
-            position: [1.0, 1.0, 1.0],
-            tex_coords: [1.0, 1.0],
-        },
-        Vertex {
-            position: [1.0, 1.0, 0.0],
-            tex_coords: [1.0, 0.0],
-        },
-    ],
-    //bottom(-y)
-    [
-        Vertex {
-            position: [0.0, 0.0, 0.0],
-            tex_coords: [0.0, 0.0],
-        },
-        Vertex {
-            position: [0.0, 0.0, 1.0],
-            tex_coords: [0.0, 1.0],
-        },
-        Vertex {
-            position: [1.0, 0.0, 1.0],
-            tex_coords: [1.0, 1.0],
-        },
-        Vertex {
-            position: [1.0, 0.0, 0.0],
-            tex_coords: [1.0, 0.0],
-        },
-    ],
-    //forward(+z)
-    [
-        Vertex {
-            position: [0.0, 0.0, 1.0],
-            tex_coords: [0.0, 0.0],
-        },
-        Vertex {
-            position: [0.0, 1.0, 1.0],
-            tex_coords: [0.0, 1.0],
-        },
-        Vertex {
-            position: [1.0, 1.0, 1.0],
-            tex_coords: [1.0, 1.0],
-        },
-        Vertex {
-            position: [1.0, 0.0, 1.0],
-            tex_coords: [1.0, 0.0],
-        },
-    ],
-    //backwards(-z)
-    [
-        Vertex {
-            position: [0.0, 0.0, 0.0],
-            tex_coords: [0.0, 0.0],
-        },
-        Vertex {
-            position: [0.0, 1.0, 0.0],
-            tex_coords: [0.0, 1.0],
-        },
-        Vertex {
-            position: [1.0, 1.0, 0.0],
-            tex_coords: [1.0, 1.0],
-        },
-        Vertex {
-            position: [1.0, 0.0, 0.0],
-            tex_coords: [1.0, 0.0],
-        },
-    ],
-    //right(+x)
-    [
-        Vertex {
-            position: [1.0, 0.0, 0.0],
-            tex_coords: [0.0, 0.0],
-        },
-        Vertex {
-            position: [1.0, 1.0, 0.0],
-            tex_coords: [0.0, 1.0],
-        },
-        Vertex {
-            position: [1.0, 1.0, 1.0],
-            tex_coords: [1.0, 1.0],
-        },
-        Vertex {
-            position: [1.0, 0.0, 1.0],
-            tex_coords: [1.0, 0.0],
-        },
-    ],
-    //left(-x)
-    [
-        Vertex {
-            position: [0.0, 0.0, 0.0],
-            tex_coords: [0.0, 0.0],
-        },
-        Vertex {
-            position: [0.0, 1.0, 0.0],
-            tex_coords: [0.0, 1.0],
-        },
-        Vertex {
-            position: [0.0, 1.0, 1.0],
-            tex_coords: [1.0, 1.0],
-        },
-        Vertex {
-            position: [0.0, 0.0, 1.0],
-            tex_coords: [1.0, 0.0],
-        },
-    ],
+struct Face {
+    vertices: [Vertex; 4],
+    dir: Direction,
+}
+
+const FACES: [Face; 6] = [
+    Face {
+        vertices: [
+            Vertex {
+                position: [0.0, 1.0, 0.0],
+                tex_coords: [0.0, 0.0],
+            },
+            Vertex {
+                position: [0.0, 1.0, 1.0],
+                tex_coords: [0.0, 1.0],
+            },
+            Vertex {
+                position: [1.0, 1.0, 1.0],
+                tex_coords: [1.0, 1.0],
+            },
+            Vertex {
+                position: [1.0, 1.0, 0.0],
+                tex_coords: [1.0, 0.0],
+            },
+        ],
+        dir: Direction::Up,
+    },
+    Face {
+        vertices: [
+            Vertex {
+                position: [0.0, 0.0, 0.0],
+                tex_coords: [0.0, 0.0],
+            },
+            Vertex {
+                position: [1.0, 0.0, 0.0],
+                tex_coords: [1.0, 0.0],
+            },
+            Vertex {
+                position: [1.0, 0.0, 1.0],
+                tex_coords: [1.0, 1.0],
+            },
+            Vertex {
+                position: [0.0, 0.0, 1.0],
+                tex_coords: [0.0, 1.0],
+            },
+        ],
+        dir: Direction::Down,
+    },
+    Face {
+        vertices: [
+            Vertex {
+                position: [0.0, 0.0, 1.0],
+                tex_coords: [0.0, 0.0],
+            },
+            Vertex {
+                position: [1.0, 0.0, 1.0],
+                tex_coords: [1.0, 0.0],
+            },
+            Vertex {
+                position: [1.0, 1.0, 1.0],
+                tex_coords: [1.0, 1.0],
+            },
+            Vertex {
+                position: [0.0, 1.0, 1.0],
+                tex_coords: [0.0, 1.0],
+            },
+        ],
+        dir: Direction::South,
+    },
+    Face {
+        vertices: [
+            Vertex {
+                position: [0.0, 0.0, 0.0],
+                tex_coords: [0.0, 0.0],
+            },
+            Vertex {
+                position: [0.0, 1.0, 0.0],
+                tex_coords: [0.0, 1.0],
+            },
+            Vertex {
+                position: [1.0, 1.0, 0.0],
+                tex_coords: [1.0, 1.0],
+            },
+            Vertex {
+                position: [1.0, 0.0, 0.0],
+                tex_coords: [1.0, 0.0],
+            },
+        ],
+        dir: Direction::North,
+    },
+    Face {
+        vertices: [
+            Vertex {
+                position: [1.0, 0.0, 0.0],
+                tex_coords: [0.0, 0.0],
+            },
+            Vertex {
+                position: [1.0, 1.0, 0.0],
+                tex_coords: [0.0, 1.0],
+            },
+            Vertex {
+                position: [1.0, 1.0, 1.0],
+                tex_coords: [1.0, 1.0],
+            },
+            Vertex {
+                position: [1.0, 0.0, 1.0],
+                tex_coords: [1.0, 0.0],
+            },
+        ],
+        dir: Direction::East,
+    },
+    Face {
+        vertices: [
+            Vertex {
+                position: [0.0, 0.0, 0.0],
+                tex_coords: [0.0, 0.0],
+            },
+            Vertex {
+                position: [0.0, 0.0, 1.0],
+                tex_coords: [1.0, 0.0],
+            },
+            Vertex {
+                position: [0.0, 1.0, 1.0],
+                tex_coords: [1.0, 1.0],
+            },
+            Vertex {
+                position: [0.0, 1.0, 0.0],
+                tex_coords: [0.0, 1.0],
+            },
+        ],
+        dir: Direction::West,
+    },
 ];
 
 #[repr(C)]
@@ -173,7 +193,22 @@ impl RenderChunk {
                 for z in 0..16 {
                     if !section.get(ChunkSectionBlockPos::new(x, y, z)).is_air() {
                         for face in FACES {
-                            for vertex in face {
+                            for vertex in face.vertices {
+                                let normal = face.dir.normal();
+                                let neighbor = ChunkSectionBlockPos::new(
+                                    (x as i8 + normal.x as i8) as u8,
+                                    (y as i8 + normal.y as i8) as u8,
+                                    (z as i8 + normal.z as i8) as u8,
+                                );
+
+                                if neighbor.x < 16
+                                    && neighbor.y < 16
+                                    && neighbor.z < 16
+                                    && !section.get(neighbor).is_air()
+                                {
+                                    continue;
+                                }
+
                                 vertices.push(Vertex {
                                     position: glam::Vec3::from_array(vertex.position)
                                         .add(glam::Vec3::new(x as f32, y as f32, z as f32))

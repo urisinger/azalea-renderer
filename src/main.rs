@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 use azalea::core::position::ChunkPos;
 use azalea::prelude::*;
 use azalea::world::Chunk;
@@ -14,9 +15,9 @@ use winit::{
     window::WindowBuilder,
 };
 
-use crate::render_plguin::RenderPlugin;
+use crate::render_plugin::RenderPlugin;
 
-mod render_plguin;
+mod render_plugin;
 mod renderer;
 
 async fn azlea_main(sender: flume::Sender<(ChunkPos, Arc<parking_lot::RwLock<Chunk>>)>) {

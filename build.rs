@@ -1,8 +1,4 @@
-use std::{
-    env,
-    io::{BufRead, BufReader},
-    process::Command,
-};
+use std::{env, io::Write, process::Command};
 
 fn main() {
     println!(
@@ -10,19 +6,38 @@ fn main() {
         "/home/uri_singer/Downloads/cobblestone.png"
     );
 
+    println!("cargo:rerun-if-changed=shaders/");
+
     std::env::set_current_dir(concat!(env!("CARGO_MANIFEST_DIR"), "/shaders")).unwrap();
-    Command::new("cargo")
-        .args(["rustc", "--", "--emit", "link=shaders.json"])
+    let output = Command::new("cargo")
+        .args([
+            "rustc",
+            "--color",
+            "always",
+            "--",
+            "--emit",
+            "link=shaders.json",
+        ])
         .env_remove("CARGO_ENCODED_RUSTFLAGS")
         .env_remove("RUSTUP_TOOLCHAIN")
         .env_remove("RUSTC")
         .env_remove("CARGO")
         .env_remove("RUSTDOC")
         .env_remove("LD_LIBRARY_PATH")
-        .spawn()
-        .expect("failed to spawn command")
-        .wait()
+        .output()
         .unwrap();
+
+    std::io::stdout().write(&output.stdout).unwrap();
+
+    std::io::stdout().flush().unwrap();
+
+    if !output.status.success() {
+        std::io::stderr().write(&output.stderr).unwrap();
+        panic!(
+            "error compiling shader lib, cargo exsited with code: {}",
+            output.status
+        );
+    }
 
     let shader_path = concat!(env!("CARGO_MANIFEST_DIR"), "/shaders", "/shaders");
 
