@@ -29,6 +29,7 @@ pub fn main_vs(
 
 #[spirv(fragment)]
 pub fn main_fs(
+    #[spirv(flat, vertex_id)] id: u32,
     out: &mut glam::Vec4,
 
     in_uv: glam::Vec2,
@@ -36,5 +37,13 @@ pub fn main_fs(
     #[spirv(descriptor_set = 0, binding = 1)] texture: &Image!(2D, type=f32, sampled),
     #[spirv(descriptor_set = 0, binding = 2)] sampler: &Sampler,
 ) {
-    *out = texture.sample(*sampler, in_uv);
+    const ID_TO_UV: [glam::Vec2; 4] = [
+        glam::Vec2 { x: 1.0, y: 0.0 },
+        glam::Vec2 { x: 0.0, y: 1.0 },
+        glam::Vec2 { x: 1.0, y: 1.0 },
+        glam::Vec2 { x: 0.0, y: 0.0 },
+    ];
+    let vertex_id = id % 4;
+
+    *out = texture.sample(*sampler, ID_TO_UV[vertex_id as usize]);
 }

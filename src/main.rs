@@ -108,7 +108,6 @@ async fn main_render(reciver: flume::Receiver<ChunkUpdate>) {
 
                 }
                 WindowEvent::RedrawRequested => {
-
                     let now = Instant::now();
                     let dt = now - last_render_time;
                     last_render_time = now;
