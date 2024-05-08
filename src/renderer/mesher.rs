@@ -1,6 +1,4 @@
 use std::{
-    array,
-    borrow::Borrow,
     thread::{self, JoinHandle},
     time::Instant,
 };
@@ -8,14 +6,13 @@ use std::{
 use azalea::{
     core::{
         direction::Direction,
-        position::{ChunkPos, ChunkSectionBlockPos, ChunkSectionPos},
+        position::{ChunkSectionPos},
     },
-    world::Section,
     BlockPos,
 };
 use glam::IVec3;
 
-use crate::render_plugin::{offset_to_index, ChunkUpdate};
+use crate::render_plugin::{ChunkUpdate};
 
 use super::chunk::Vertex;
 

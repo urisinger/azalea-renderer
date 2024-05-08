@@ -1,10 +1,10 @@
-use std::{array, slice::SliceIndex, sync::Arc};
+use std::{array, slice::SliceIndex};
 
 use azalea::{
     app::Plugin,
     chunks::ReceiveChunkEvent,
     core::{
-        position::{ChunkBlockPos, ChunkPos, ChunkSectionBlockPos},
+        position::{ChunkPos, ChunkSectionBlockPos},
         tick::GameTick,
     },
     world::Chunk,
