@@ -1,9 +1,8 @@
 use std::{collections::HashMap, fs, io::BufReader, num::NonZeroU64};
 
-use azalea::{core::position::ChunkPos, world::Chunk};
-
 use super::{
     chunk::{RenderChunk, Vertex},
+    mesher::MeshUpdate,
     texture::Texture,
 };
 
@@ -231,16 +230,17 @@ impl WorldRenderer {
         );
     }
 
-    pub fn add_chunk(&mut self, device: &wgpu::Device, pos: &ChunkPos, chunk: &Chunk) {
-        let mut y = 0;
-        for section in &chunk.sections {
-            let pos = glam::IVec3::new(pos.x, y, pos.z);
-            let render_chunk =
-                RenderChunk::from_section(device, &self.chunk_bind_layout, section, pos);
+    pub fn update_chunk(&mut self, device: &wgpu::Device, update: &MeshUpdate) {
+        let pos = glam::IVec3::new(update.pos.x, update.pos.y, update.pos.z);
+        let render_chunk = RenderChunk::from_vertex_index(
+            device,
+            &self.chunk_bind_layout,
+            &update.vertices,
+            &update.indices,
+            pos,
+        );
 
-            self.world.chunks.insert(pos, render_chunk);
-            y += 1;
-        }
+        self.world.chunks.insert(pos, render_chunk);
     }
 
     pub fn update(&mut self, queue: &wgpu::Queue) {
@@ -283,24 +283,11 @@ impl WorldRenderer {
         render_pass.set_bind_group(0, &self.global_bind_group, &[]);
 
         for (_, chunk) in &self.world.chunks {
-            if chunk.index_buffer.size() > 20 {
-                render_pass.set_bind_group(
-                    1,
-                    &self
-                        .world
-                        .chunks
-                        .get(&glam::IVec3 { x: 0, y: 0, z: 0 })
-                        .unwrap_or(chunk)
-                        .bind_group,
-                    &[],
-                );
+            render_pass.set_bind_group(1, &chunk.bind_group, &[]);
 
-                render_pass.set_vertex_buffer(0, chunk.vertex_buffer.slice(..));
-                render_pass
-                    .set_index_buffer(chunk.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
-                render_pass.draw_indexed(0..chunk.len, 0, 0..1);
-                break;
-            }
+            render_pass.set_vertex_buffer(0, chunk.vertex_buffer.slice(..));
+            render_pass.set_index_buffer(chunk.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
+            render_pass.draw_indexed(0..chunk.len, 0, 0..1);
         }
     }
 }

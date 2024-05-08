@@ -1,9 +1,6 @@
-use std::{num::NonZeroU64, ops::Add};
+use std::num::NonZeroU64;
 
-use azalea::{
-    core::{direction::Direction, position::ChunkSectionBlockPos},
-    world::Section,
-};
+use azalea::core::direction::Direction;
 use wgpu::util::DeviceExt;
 
 #[repr(C)]
@@ -177,63 +174,6 @@ pub struct ChunkUniform {
 }
 
 impl RenderChunk {
-    pub fn from_section(
-        device: &wgpu::Device,
-
-        layout: &wgpu::BindGroupLayout,
-        section: &Section,
-        pos: glam::IVec3,
-    ) -> Self {
-        let mut vertices = Vec::new();
-        let mut indices = Vec::new();
-
-        // Iterate over the chunk's blocks and generate mesh vertices
-        for y in 0..16 {
-            for x in 0..16 {
-                for z in 0..16 {
-                    if !section.get(ChunkSectionBlockPos::new(x, y, z)).is_air() {
-                        for face in FACES {
-                            for vertex in face.vertices {
-                                let normal = face.dir.normal();
-                                let neighbor = ChunkSectionBlockPos::new(
-                                    (x as i8 + normal.x as i8) as u8,
-                                    (y as i8 + normal.y as i8) as u8,
-                                    (z as i8 + normal.z as i8) as u8,
-                                );
-
-                                if neighbor.x < 16
-                                    && neighbor.y < 16
-                                    && neighbor.z < 16
-                                    && !section.get(neighbor).is_air()
-                                {
-                                    continue;
-                                }
-
-                                vertices.push(Vertex {
-                                    position: glam::Vec3::from_array(vertex.position)
-                                        .add(glam::Vec3::new(x as f32, y as f32, z as f32))
-                                        .into(),
-                                    tex_coords: vertex.tex_coords,
-                                })
-                            }
-
-                            indices.extend_from_slice(&[
-                                vertices.len() as u16 + 0,
-                                vertices.len() as u16 + 1,
-                                vertices.len() as u16 + 2,
-                                vertices.len() as u16 + 0,
-                                vertices.len() as u16 + 2,
-                                vertices.len() as u16 + 3,
-                            ])
-                        }
-                    }
-                }
-            }
-        }
-
-        Self::from_vertex_index(device, layout, &vertices, &indices, pos)
-    }
-
     pub fn from_vertex_index(
         device: &wgpu::Device,
         layout: &wgpu::BindGroupLayout,

@@ -1,11 +1,8 @@
 #![allow(dead_code)]
-use azalea::core::position::ChunkPos;
 use azalea::prelude::*;
-use azalea::world::Chunk;
-use azalea::{Account, ClientBuilder};
 use bevy_ecs::component::Component;
+use render_plugin::ChunkUpdate;
 use renderer::Renderer;
-use std::sync::Arc;
 use std::time::Instant;
 use winit::window::CursorGrabMode;
 use winit::{
@@ -16,11 +13,12 @@ use winit::{
 };
 
 use crate::render_plugin::RenderPlugin;
+use log::*;
 
 mod render_plugin;
 mod renderer;
 
-async fn azlea_main(sender: flume::Sender<(ChunkPos, Arc<parking_lot::RwLock<Chunk>>)>) {
+async fn azlea_main(sender: flume::Sender<ChunkUpdate>) {
     let account = Account::offline("bot");
     println!("hi from tokio");
     ClientBuilder::new()
@@ -61,13 +59,15 @@ fn main() {
         .block_on(main_render(recv));
 }
 
-async fn main_render(reciver: flume::Receiver<(ChunkPos, Arc<parking_lot::RwLock<Chunk>>)>) {
+async fn main_render(reciver: flume::Receiver<ChunkUpdate>) {
     let event_loop = EventLoop::new().unwrap();
     let window = WindowBuilder::new().build(&event_loop).unwrap();
 
     let mut renderer = Renderer::new(&window, reciver).await;
 
     let mut last_render_time = Instant::now();
+
+    let mut is_locked = false;
     event_loop
         .run(move |event, elwt| match event {
             Event::AboutToWait => {
@@ -85,6 +85,8 @@ async fn main_render(reciver: flume::Receiver<(ChunkPos, Arc<parking_lot::RwLock
             } if window_id == renderer.window().id() && !renderer.input(event) => match event {
                 WindowEvent::CloseRequested => elwt.exit(),
 
+
+
                 WindowEvent::KeyboardInput {
                     event:
                         KeyEvent {
@@ -93,10 +95,20 @@ async fn main_render(reciver: flume::Receiver<(ChunkPos, Arc<parking_lot::RwLock
                             ..
                         },
                     ..
+                } => {
+                    if is_locked{
+                        let _ = renderer.window().set_cursor_grab(CursorGrabMode::None).inspect_err(|e| error!("Cannot free cursor: {}", e));
+                        renderer.window().set_cursor_visible(true);
+
+                    }else{
+                        let _ = renderer.window().set_cursor_grab(CursorGrabMode::Confined).inspect_err(|e| error!("Cannot set confined, error: {}", e));
+                        renderer.window().set_cursor_visible(false);
+                    }
+                    is_locked = !is_locked;
+
                 }
-                | WindowEvent::RedrawRequested => {
-                    renderer.window().set_cursor_grab(CursorGrabMode::Confined).unwrap();
-                    renderer.window().set_cursor_visible(false);
+                WindowEvent::RedrawRequested => {
+
                     let now = Instant::now();
                     let dt = now - last_render_time;
                     last_render_time = now;

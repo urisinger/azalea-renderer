@@ -6,7 +6,7 @@ fn main() {
         "/home/uri_singer/Downloads/cobblestone.png"
     );
 
-    println!("cargo:rerun-if-changed=shaders/");
+    println!("cargo:rerun-if-changed=shaders/src/");
 
     std::env::set_current_dir(concat!(env!("CARGO_MANIFEST_DIR"), "/shaders")).unwrap();
     let output = Command::new("cargo")

@@ -1,6 +1,5 @@
-use std::{sync::Arc, time::Duration};
+use std::time::Duration;
 
-use azalea::{core::position::ChunkPos, world::Chunk};
 use state::State;
 use winit::{
     event::{KeyEvent, WindowEvent},
@@ -8,13 +7,17 @@ use winit::{
     window::Window,
 };
 
+use crate::render_plugin::ChunkUpdate;
+
 use self::{
     camera::{Camera, CameraController, Projection},
+    mesher::Mesher,
     world::WorldRenderer,
 };
 
 mod camera;
 mod chunk;
+mod mesher;
 mod state;
 mod texture;
 mod world;
@@ -29,14 +32,11 @@ pub struct Renderer<'a> {
 
     pub camera_controller: CameraController,
 
-    reciver: flume::Receiver<(ChunkPos, Arc<parking_lot::RwLock<Chunk>>)>,
+    mesher: Mesher,
 }
 
 impl<'a> Renderer<'a> {
-    pub async fn new(
-        window: &'a Window,
-        reciver: flume::Receiver<(ChunkPos, Arc<parking_lot::RwLock<Chunk>>)>,
-    ) -> Self {
+    pub async fn new(window: &'a Window, reciver: flume::Receiver<ChunkUpdate>) -> Self {
         let state = State::new_async(window).await;
 
         let world_renderer =
@@ -44,16 +44,12 @@ impl<'a> Renderer<'a> {
 
         let camera_controller = CameraController::new(15.0, 0.5);
 
-        let camera = Camera::new(
-            (0.0, 5.0, 10.0),
-            -90.0_f32.to_radians(),
-            -20.0_f32.to_radians(),
-        );
+        let camera = Camera::new((0.0, 64.0, 0.0), 0.0f32.to_radians(), 0.0f32.to_radians());
 
         let projection = Projection::new(
             state.main_window.config.width,
             state.main_window.config.height,
-            45.0_f32.to_radians(),
+            45.0f32.to_radians(),
             0.1,
             100.0,
         );
@@ -65,7 +61,7 @@ impl<'a> Renderer<'a> {
             projection,
             camera_controller,
 
-            reciver,
+            mesher: Mesher::new(reciver),
         }
     }
 
@@ -101,9 +97,9 @@ impl<'a> Renderer<'a> {
     }
 
     pub fn update(&mut self, dt: Duration) {
-        while let Ok((pos, chunk)) = self.reciver.try_recv() {
+        for update in self.mesher.iter() {
             self.world_renderer
-                .add_chunk(&self.state.device, &pos, &chunk.read());
+                .update_chunk(&self.state.device, &update);
         }
         self.camera_controller.update_camera(&mut self.camera, dt);
         self.world_renderer

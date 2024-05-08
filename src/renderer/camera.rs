@@ -7,12 +7,14 @@ use winit::{
 };
 
 #[rustfmt::skip]
-pub const OPENGL_TO_WGPU_MATRIX: glam::Mat4 = glam::Mat4::from_cols_array(&[
+const OPENGL_TO_WGPU_MATRIX: glam::Mat4 = glam::Mat4::from_cols_array(&[
     1.0, 0.0, 0.0, 0.0,
     0.0, 1.0, 0.0, 0.0,
     0.0, 0.0, 0.5, 0.5,
     0.0, 0.0, 0.0, 1.0,]
 );
+
+const SAFE_FRAC_PI_2: f32 = FRAC_PI_2 - 0.0001;
 
 use glam::Vec3Swizzles;
 #[derive(Copy, Clone, Debug)]
@@ -194,6 +196,6 @@ impl CameraController {
         self.rotate_vertical = 0.0;
 
         // Keep the camera's angle from going too high/low.
-        camera.pitch = camera.pitch.clamp(-FRAC_PI_2, FRAC_PI_2);
+        camera.pitch = camera.pitch.clamp(-SAFE_FRAC_PI_2, SAFE_FRAC_PI_2);
     }
 }
