@@ -28,17 +28,15 @@ pub struct ChunkUpdate {
 
 impl ChunkUpdate {
     //BlockPos is relative to the chunk
-    pub fn get_block(&self, pos: BlockPos) -> Option<azalea::blocks::BlockState> {
+    pub fn get_block(&self, pos: BlockPos, section_y: usize) -> Option<azalea::blocks::BlockState> {
         let chunk_pos = ChunkPos::from(pos);
-        let pos = ChunkBlockPos::from(pos);
+        let pos = ChunkSectionBlockPos::from(pos);
         if let Some(chunk_idx) = offset_to_index(chunk_pos) {
-            self.neighbers[chunk_idx].as_ref().map(|c| {
-                c.sections
-                    .get(pos.y as usize / 16)
-                    .map(|s| s.get(ChunkSectionBlockPos::new(pos.x, (pos.y % 16) as u8, pos.z)))
-            })?
+            self.neighbers[chunk_idx]
+                .as_ref()
+                .map(|c| c.sections.get(section_y).map(|s| s.get(pos)))?
         } else {
-            self.chunk.get(&pos, -64)
+            self.chunk.sections.get(section_y).map(|c| c.get(pos))
         }
     }
 }
