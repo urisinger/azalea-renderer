@@ -27,8 +27,8 @@ pub fn main_vs(
     let vertex_id = id % 4;
     const ID_TO_UV: [glam::Vec2; 4] = [
         glam::Vec2 { x: 1.0, y: 0.0 },
-        glam::Vec2 { x: 0.0, y: 1.0 },
         glam::Vec2 { x: 1.0, y: 1.0 },
+        glam::Vec2 { x: 0.0, y: 1.0 },
         glam::Vec2 { x: 0.0, y: 0.0 },
     ];
 

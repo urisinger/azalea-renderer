@@ -113,7 +113,7 @@ pub fn mesh_section(
                             vertices.len() as u16 + 3,
                         ]);
                         for vertex in face.vertices {
-                            let normal = face.dir.normal();
+                            let normal = face.dir.inormal();
                             let neighbor = ChunkSectionBlockPos::new(
                                 (x as i8 + normal.x as i8).max(0) as u8,
                                 (y as i8 + normal.y as i8).max(0) as u8,
