@@ -8,6 +8,8 @@ fn main() {
 
     println!("cargo:rerun-if-changed=shaders/src/");
 
+    println!("cargo:rerun-if-changed=shaders/Cargo.toml");
+
     std::env::set_current_dir(concat!(env!("CARGO_MANIFEST_DIR"), "/shaders")).unwrap();
     let output = Command::new("cargo")
         .args([
@@ -16,7 +18,7 @@ fn main() {
             "always",
             "--",
             "--emit",
-            "link=shaders.json",
+            "link=shaders.spv.json",
         ])
         .env_remove("CARGO_ENCODED_RUSTFLAGS")
         .env_remove("RUSTUP_TOOLCHAIN")
@@ -39,7 +41,7 @@ fn main() {
         );
     }
 
-    let shader_path = concat!(env!("CARGO_MANIFEST_DIR"), "/shaders", "/shaders");
+    let shader_path = concat!(env!("CARGO_MANIFEST_DIR"), "/shaders", "/shaders.spv");
 
     println!("cargo:rustc-env=shaders.spv={}", shader_path);
 }

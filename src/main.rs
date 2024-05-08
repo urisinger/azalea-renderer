@@ -1,5 +1,6 @@
 #![allow(dead_code)]
-use azalea::prelude::*;
+use azalea::pathfinder::goals::BlockPosGoal;
+use azalea::{prelude::*, BlockPos};
 use bevy_ecs::component::Component;
 use render_plugin::ChunkUpdate;
 use renderer::Renderer;
@@ -30,10 +31,11 @@ async fn azlea_main(sender: flume::Sender<ChunkUpdate>) {
         .unwrap();
 }
 
-async fn handle(_bot: azalea::Client, event: azalea::Event, _state: State) -> anyhow::Result<()> {
+async fn handle(bot: azalea::Client, event: azalea::Event, _state: State) -> anyhow::Result<()> {
     match event {
         azalea::Event::Chat(m) => {
             println!("{}", m.message().to_ansi());
+            bot.goto(BlockPosGoal(BlockPos::new(1000, 64, 1000)))
         }
         _ => {}
     }

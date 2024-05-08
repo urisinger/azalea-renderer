@@ -1,18 +1,15 @@
 use std::num::NonZeroU64;
 
-use azalea::core::direction::Direction;
 use wgpu::util::DeviceExt;
 
 #[repr(C)]
 #[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct Vertex {
-    pub position: [f32; 3],
-    pub tex_coords: [f32; 2],
+    pub position: [i32; 3],
 }
 
 impl Vertex {
-    const ATTRIBS: [wgpu::VertexAttribute; 2] =
-        wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x2];
+    const ATTRIBS: [wgpu::VertexAttribute; 1] = wgpu::vertex_attr_array![0 => Sint32x3];
 
     pub fn desc() -> wgpu::VertexBufferLayout<'static> {
         use std::mem;
@@ -32,140 +29,6 @@ pub struct RenderChunk {
     pub bind_group: wgpu::BindGroup,
     pub len: u32,
 }
-
-struct Face {
-    vertices: [Vertex; 4],
-    dir: Direction,
-}
-
-const FACES: [Face; 6] = [
-    Face {
-        vertices: [
-            Vertex {
-                position: [0.0, 1.0, 0.0],
-                tex_coords: [0.0, 0.0],
-            },
-            Vertex {
-                position: [0.0, 1.0, 1.0],
-                tex_coords: [0.0, 1.0],
-            },
-            Vertex {
-                position: [1.0, 1.0, 1.0],
-                tex_coords: [1.0, 1.0],
-            },
-            Vertex {
-                position: [1.0, 1.0, 0.0],
-                tex_coords: [1.0, 0.0],
-            },
-        ],
-        dir: Direction::Up,
-    },
-    Face {
-        vertices: [
-            Vertex {
-                position: [0.0, 0.0, 0.0],
-                tex_coords: [0.0, 0.0],
-            },
-            Vertex {
-                position: [1.0, 0.0, 0.0],
-                tex_coords: [1.0, 0.0],
-            },
-            Vertex {
-                position: [1.0, 0.0, 1.0],
-                tex_coords: [1.0, 1.0],
-            },
-            Vertex {
-                position: [0.0, 0.0, 1.0],
-                tex_coords: [0.0, 1.0],
-            },
-        ],
-        dir: Direction::Down,
-    },
-    Face {
-        vertices: [
-            Vertex {
-                position: [0.0, 0.0, 1.0],
-                tex_coords: [0.0, 0.0],
-            },
-            Vertex {
-                position: [1.0, 0.0, 1.0],
-                tex_coords: [1.0, 0.0],
-            },
-            Vertex {
-                position: [1.0, 1.0, 1.0],
-                tex_coords: [1.0, 1.0],
-            },
-            Vertex {
-                position: [0.0, 1.0, 1.0],
-                tex_coords: [0.0, 1.0],
-            },
-        ],
-        dir: Direction::South,
-    },
-    Face {
-        vertices: [
-            Vertex {
-                position: [0.0, 0.0, 0.0],
-                tex_coords: [0.0, 0.0],
-            },
-            Vertex {
-                position: [0.0, 1.0, 0.0],
-                tex_coords: [0.0, 1.0],
-            },
-            Vertex {
-                position: [1.0, 1.0, 0.0],
-                tex_coords: [1.0, 1.0],
-            },
-            Vertex {
-                position: [1.0, 0.0, 0.0],
-                tex_coords: [1.0, 0.0],
-            },
-        ],
-        dir: Direction::North,
-    },
-    Face {
-        vertices: [
-            Vertex {
-                position: [1.0, 0.0, 0.0],
-                tex_coords: [0.0, 0.0],
-            },
-            Vertex {
-                position: [1.0, 1.0, 0.0],
-                tex_coords: [0.0, 1.0],
-            },
-            Vertex {
-                position: [1.0, 1.0, 1.0],
-                tex_coords: [1.0, 1.0],
-            },
-            Vertex {
-                position: [1.0, 0.0, 1.0],
-                tex_coords: [1.0, 0.0],
-            },
-        ],
-        dir: Direction::East,
-    },
-    Face {
-        vertices: [
-            Vertex {
-                position: [0.0, 0.0, 0.0],
-                tex_coords: [0.0, 0.0],
-            },
-            Vertex {
-                position: [0.0, 0.0, 1.0],
-                tex_coords: [1.0, 0.0],
-            },
-            Vertex {
-                position: [0.0, 1.0, 1.0],
-                tex_coords: [1.0, 1.0],
-            },
-            Vertex {
-                position: [0.0, 1.0, 0.0],
-                tex_coords: [0.0, 1.0],
-            },
-        ],
-        dir: Direction::West,
-    },
-];
 
 #[repr(C)]
 #[derive(Debug, Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]

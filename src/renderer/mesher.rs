@@ -1,17 +1,21 @@
 use std::{
     array,
+    borrow::Borrow,
     thread::{self, JoinHandle},
+    time::Instant,
 };
 
 use azalea::{
     core::{
         direction::Direction,
-        position::{ChunkSectionBlockPos, ChunkSectionPos},
+        position::{ChunkPos, ChunkSectionBlockPos, ChunkSectionPos},
     },
     world::Section,
+    BlockPos,
 };
+use glam::IVec3;
 
-use crate::render_plugin::ChunkUpdate;
+use crate::render_plugin::{offset_to_index, ChunkUpdate};
 
 use super::chunk::Vertex;
 
@@ -34,47 +38,18 @@ impl Mesher {
 
         let chunk_thread = thread::spawn(move || {
             for update in reciver.iter() {
-                let mut y = 0;
-                let chunk = update.chunk.read();
-                for section in &chunk.sections {
-                    let pos = ChunkSectionPos::new(update.pos.x, y, update.pos.z);
-                    let neighbers = array::from_fn(|i| {
-                        let dir: Direction = unsafe { std::mem::transmute(i as u8) };
+                let time = Instant::now();
 
-                        match dir {
-                            Direction::Down => {
-                                if y as i32 >= 1 {
-                                    chunk.sections.get((y - 1) as usize).cloned()
-                                } else {
-                                    None
-                                }
-                            }
-                            Direction::Up => chunk.sections.get(y as usize + 1).cloned(),
-                            Direction::North => update.neighbers[0]
-                                .clone()
-                                .map(|c| c.read().sections.get(y as usize).cloned())
-                                .flatten(),
-                            Direction::South => update.neighbers[1]
-                                .clone()
-                                .map(|c| c.read().sections.get(y as usize).cloned())
-                                .flatten(),
-                            Direction::West => update.neighbers[2]
-                                .clone()
-                                .map(|c| c.read().sections.get(y as usize).cloned())
-                                .flatten(),
-                            Direction::East => update.neighbers[3]
-                                .clone()
-                                .map(|c| c.read().sections.get(y as usize).cloned())
-                                .flatten(),
-                        }
-                    });
+                for y in 0..update.chunk.sections.len() {
+                    let pos = ChunkSectionPos::new(update.pos.x, y as i32, update.pos.z);
 
-                    let render_chunk = mesh_section(pos, section, &neighbers);
+                    let render_chunk = mesh_section(pos, &update);
                     section_send
                         .send(render_chunk)
                         .expect("Client disconnected, panicing.");
-                    y += 1;
                 }
+
+                println!("Meshing chunk took: {}", time.elapsed().as_secs_f32());
             }
         });
 
@@ -89,11 +64,7 @@ impl Mesher {
     }
 }
 
-pub fn mesh_section(
-    pos: ChunkSectionPos,
-    section: &Section,
-    neighbers: &[Option<Section>; 6],
-) -> MeshUpdate {
+pub fn mesh_section(pos: ChunkSectionPos, update: &ChunkUpdate) -> MeshUpdate {
     let mut vertices = Vec::new();
     let mut indices = Vec::new();
 
@@ -101,8 +72,9 @@ pub fn mesh_section(
     for y in 0..16 {
         for x in 0..16 {
             for z in 0..16 {
-                let pos = ChunkSectionBlockPos::new(x, y, z);
-                if !section.get(pos).is_air() {
+                let pos = BlockPos::new(x, y + pos.y * 16, z);
+
+                if !update.get_block(pos).is_some_and(|b| b.is_air()) {
                     for face in FACES {
                         indices.extend_from_slice(&[
                             vertices.len() as u16 + 0,
@@ -112,58 +84,17 @@ pub fn mesh_section(
                             vertices.len() as u16 + 2,
                             vertices.len() as u16 + 3,
                         ]);
-                        for vertex in face.vertices {
+                        for offset in face.offsets {
                             let normal = face.dir.inormal();
-                            let neighbor = ChunkSectionBlockPos::new(
-                                (x as i8 + normal.x as i8).max(0) as u8,
-                                (y as i8 + normal.y as i8).max(0) as u8,
-                                (z as i8 + normal.z as i8).max(0) as u8,
-                            );
+                            let neighbor = BlockPos::new(x + normal.x, y + normal.y, z + normal.z);
 
-                            if neighbor.x < 16
-                                && neighbor.y < 16
-                                && neighbor.z < 16
-                                && x as i8 + normal.x as i8 >= 0
-                                && y as i8 + normal.y as i8 >= 0
-                                && z as i8 + normal.z as i8 >= 0
-                            {
-                                if !section.get(neighbor).is_air() {
-                                    continue;
-                                }
-                            } else {
-                                if let Some(section) = &neighbers[unsafe {
-                                    std::mem::transmute::<Direction, u8>(face.dir) as usize
-                                }] {
-                                    let new_chunk_pos = match face.dir {
-                                        Direction::Down => {
-                                            ChunkSectionBlockPos::new(pos.x, 15, pos.z)
-                                        }
-                                        Direction::Up => ChunkSectionBlockPos::new(pos.x, 0, pos.z),
-                                        Direction::North => {
-                                            ChunkSectionBlockPos::new(pos.x, pos.y, 15)
-                                        }
-                                        Direction::South => {
-                                            ChunkSectionBlockPos::new(pos.x, pos.y, 0)
-                                        }
-                                        Direction::West => {
-                                            ChunkSectionBlockPos::new(15, pos.y, pos.z)
-                                        }
-                                        Direction::East => {
-                                            ChunkSectionBlockPos::new(0, pos.y, pos.z)
-                                        }
-                                    };
-
-                                    if !section.get(new_chunk_pos).is_air() {
-                                        continue;
-                                    }
-                                }
+                            if !update.get_block(neighbor).is_some_and(|b| b.is_air()) {
+                                continue;
                             }
 
                             vertices.push(Vertex {
-                                position: (glam::Vec3::from_array(vertex.position)
-                                    + glam::Vec3::new(x as f32, y as f32, z as f32))
-                                .into(),
-                                tex_coords: vertex.tex_coords,
+                                position: (offset + glam::IVec3::new(x as i32, y as i32, z as i32))
+                                    .into(),
                             });
                         }
                     }
@@ -172,141 +103,69 @@ pub fn mesh_section(
         }
     }
     MeshUpdate {
-        pos: pos,
+        pos,
         indices,
         vertices,
     }
 }
 
 struct Face {
-    vertices: [Vertex; 4],
+    offsets: [IVec3; 4],
     dir: Direction,
 }
 
 const FACES: [Face; 6] = [
     Face {
-        vertices: [
-            Vertex {
-                position: [0.0, 1.0, 0.0],
-                tex_coords: [0.0, 0.0],
-            },
-            Vertex {
-                position: [0.0, 1.0, 1.0],
-                tex_coords: [0.0, 1.0],
-            },
-            Vertex {
-                position: [1.0, 1.0, 1.0],
-                tex_coords: [1.0, 1.0],
-            },
-            Vertex {
-                position: [1.0, 1.0, 0.0],
-                tex_coords: [1.0, 0.0],
-            },
+        offsets: [
+            glam::IVec3::new(0, 1, 0),
+            glam::IVec3::new(0, 1, 1),
+            glam::IVec3::new(1, 1, 1),
+            glam::IVec3::new(1, 1, 0),
         ],
         dir: Direction::Up,
     },
     Face {
-        vertices: [
-            Vertex {
-                position: [0.0, 0.0, 0.0],
-                tex_coords: [0.0, 0.0],
-            },
-            Vertex {
-                position: [1.0, 0.0, 0.0],
-                tex_coords: [1.0, 0.0],
-            },
-            Vertex {
-                position: [1.0, 0.0, 1.0],
-                tex_coords: [1.0, 1.0],
-            },
-            Vertex {
-                position: [0.0, 0.0, 1.0],
-                tex_coords: [0.0, 1.0],
-            },
+        offsets: [
+            glam::IVec3::new(0, 0, 0),
+            glam::IVec3::new(1, 0, 0),
+            glam::IVec3::new(1, 0, 1),
+            glam::IVec3::new(0, 0, 1),
         ],
         dir: Direction::Down,
     },
     Face {
-        vertices: [
-            Vertex {
-                position: [0.0, 0.0, 1.0],
-                tex_coords: [0.0, 0.0],
-            },
-            Vertex {
-                position: [1.0, 0.0, 1.0],
-                tex_coords: [1.0, 0.0],
-            },
-            Vertex {
-                position: [1.0, 1.0, 1.0],
-                tex_coords: [1.0, 1.0],
-            },
-            Vertex {
-                position: [0.0, 1.0, 1.0],
-                tex_coords: [0.0, 1.0],
-            },
+        offsets: [
+            glam::IVec3::new(0, 0, 1),
+            glam::IVec3::new(1, 0, 1),
+            glam::IVec3::new(1, 1, 1),
+            glam::IVec3::new(0, 1, 1),
         ],
         dir: Direction::South,
     },
     Face {
-        vertices: [
-            Vertex {
-                position: [0.0, 0.0, 0.0],
-                tex_coords: [0.0, 0.0],
-            },
-            Vertex {
-                position: [0.0, 1.0, 0.0],
-                tex_coords: [0.0, 1.0],
-            },
-            Vertex {
-                position: [1.0, 1.0, 0.0],
-                tex_coords: [1.0, 1.0],
-            },
-            Vertex {
-                position: [1.0, 0.0, 0.0],
-                tex_coords: [1.0, 0.0],
-            },
+        offsets: [
+            glam::IVec3::new(0, 0, 0),
+            glam::IVec3::new(0, 1, 0),
+            glam::IVec3::new(1, 1, 0),
+            glam::IVec3::new(1, 0, 0),
         ],
         dir: Direction::North,
     },
     Face {
-        vertices: [
-            Vertex {
-                position: [1.0, 0.0, 0.0],
-                tex_coords: [0.0, 0.0],
-            },
-            Vertex {
-                position: [1.0, 1.0, 0.0],
-                tex_coords: [0.0, 1.0],
-            },
-            Vertex {
-                position: [1.0, 1.0, 1.0],
-                tex_coords: [1.0, 1.0],
-            },
-            Vertex {
-                position: [1.0, 0.0, 1.0],
-                tex_coords: [1.0, 0.0],
-            },
+        offsets: [
+            glam::IVec3::new(1, 0, 0),
+            glam::IVec3::new(1, 1, 0),
+            glam::IVec3::new(1, 1, 1),
+            glam::IVec3::new(1, 0, 1),
         ],
         dir: Direction::East,
     },
     Face {
-        vertices: [
-            Vertex {
-                position: [0.0, 0.0, 0.0],
-                tex_coords: [0.0, 0.0],
-            },
-            Vertex {
-                position: [0.0, 0.0, 1.0],
-                tex_coords: [1.0, 0.0],
-            },
-            Vertex {
-                position: [0.0, 1.0, 1.0],
-                tex_coords: [1.0, 1.0],
-            },
-            Vertex {
-                position: [0.0, 1.0, 0.0],
-                tex_coords: [0.0, 1.0],
-            },
+        offsets: [
+            glam::IVec3::new(0, 0, 0),
+            glam::IVec3::new(0, 0, 1),
+            glam::IVec3::new(0, 1, 1),
+            glam::IVec3::new(0, 1, 0),
         ],
         dir: Direction::West,
     },

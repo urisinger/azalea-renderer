@@ -17,8 +17,7 @@ pub fn main_vs(
     #[spirv(position)] out_pos: &mut glam::Vec4,
     out_uv: &mut glam::Vec2,
 
-    in_pos: glam::Vec3,
-    in_uv: glam::Vec2,
+    in_pos: glam::IVec3,
 
     #[spirv(uniform, descriptor_set = 0, binding = 0)] world_uniform: &WorldUniform,
 
@@ -33,7 +32,8 @@ pub fn main_vs(
     ];
 
     *out_uv = ID_TO_UV[vertex_id as usize];
-    *out_pos = world_uniform.view_proj * (in_pos + chunk_uniform.pos.as_vec3() * 16.0).extend(1.0);
+    *out_pos = world_uniform.view_proj
+        * (in_pos.as_vec3() + chunk_uniform.pos.as_vec3() * 16.0).extend(1.0);
 }
 
 #[spirv(fragment)]

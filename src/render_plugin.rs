@@ -1,11 +1,14 @@
-use std::{array, sync::Arc};
+use std::{array, slice::SliceIndex, sync::Arc};
 
 use azalea::{
     app::Plugin,
     chunks::ReceiveChunkEvent,
-    core::{position::ChunkPos, tick::GameTick},
+    core::{
+        position::{ChunkBlockPos, ChunkPos, ChunkSectionBlockPos},
+        tick::GameTick,
+    },
     world::Chunk,
-    InstanceHolder,
+    BlockPos, InstanceHolder,
 };
 use bevy_ecs::{
     event::EventReader,
@@ -18,9 +21,26 @@ use log::*;
 #[derive(Debug)]
 pub struct ChunkUpdate {
     pub pos: ChunkPos,
-    pub chunk: Arc<parking_lot::RwLock<Chunk>>,
+    pub chunk: Chunk,
 
-    pub neighbers: [Option<Arc<parking_lot::RwLock<Chunk>>>; 4],
+    pub neighbers: [Option<Chunk>; 8],
+}
+
+impl ChunkUpdate {
+    //BlockPos is relative to the chunk
+    pub fn get_block(&self, pos: BlockPos) -> Option<azalea::blocks::BlockState> {
+        let chunk_pos = ChunkPos::from(pos);
+        let pos = ChunkBlockPos::from(pos);
+        if let Some(chunk_idx) = offset_to_index(chunk_pos) {
+            self.neighbers[chunk_idx].as_ref().map(|c| {
+                c.sections
+                    .get(pos.y as usize / 16)
+                    .map(|s| s.get(ChunkSectionBlockPos::new(pos.x, (pos.y % 16) as u8, pos.z)))
+            })?
+        } else {
+            self.chunk.get(&pos, -64)
+        }
+    }
 }
 
 #[derive(Debug, Resource)]
@@ -42,6 +62,34 @@ impl Plugin for RenderPlugin {
     }
 }
 
+pub fn index_to_offset(index: usize) -> Option<ChunkPos> {
+    match index {
+        0 => Some(ChunkPos { x: 0, z: -1 }),  // North
+        1 => Some(ChunkPos { x: 0, z: 1 }),   // South
+        2 => Some(ChunkPos { x: 1, z: 0 }),   // East
+        3 => Some(ChunkPos { x: -1, z: 0 }),  // West
+        4 => Some(ChunkPos { x: 1, z: -1 }),  // Northeast
+        5 => Some(ChunkPos { x: 1, z: 1 }),   // Southeast
+        6 => Some(ChunkPos { x: -1, z: 1 }),  // Southwest
+        7 => Some(ChunkPos { x: -1, z: -1 }), // Northwest
+        _ => None,
+    }
+}
+
+pub fn offset_to_index(offset: ChunkPos) -> Option<usize> {
+    match offset {
+        ChunkPos { x: 0, z: -1 } => Some(0),  // North
+        ChunkPos { x: 0, z: 1 } => Some(1),   // South
+        ChunkPos { x: 1, z: 0 } => Some(2),   // East
+        ChunkPos { x: -1, z: 0 } => Some(3),  // West
+        ChunkPos { x: 1, z: -1 } => Some(4),  // Northeast
+        ChunkPos { x: 1, z: 1 } => Some(5),   // Southeast
+        ChunkPos { x: -1, z: 1 } => Some(6),  // Southwest
+        ChunkPos { x: -1, z: -1 } => Some(7), // Northwest
+        _ => None,
+    }
+}
+
 fn send_chunks_system(
     mut events: EventReader<ReceiveChunkEvent>,
     query: Query<&InstanceHolder>,
@@ -59,16 +107,16 @@ fn send_chunks_system(
                 .0
                 .send(ChunkUpdate {
                     pos,
-                    chunk,
+                    chunk: chunk.read().clone(),
                     neighbers: array::from_fn(|i| {
-                        const OFFSETS: [ChunkPos; 4] = [
-                            ChunkPos { x: 0, z: -1 },
-                            ChunkPos { x: 0, z: 1 },
-                            ChunkPos { x: -1, z: 0 },
-                            ChunkPos { x: 1, z: 0 },
-                        ];
-
-                        instance.chunks.get(&(pos + OFFSETS[i]))
+                        instance
+                            .chunks
+                            .get(
+                                &(pos
+                                    + index_to_offset(i)
+                                        .expect("index should always be less then 8")),
+                            )
+                            .map(|c| c.read().clone())
                     }),
                 })
                 .unwrap();
