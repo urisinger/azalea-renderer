@@ -4,15 +4,12 @@ use std::{
 };
 
 use azalea::{
-    core::{
-        direction::Direction,
-        position::{ChunkSectionPos},
-    },
+    core::{direction::Direction, position::ChunkSectionPos},
     BlockPos,
 };
 use glam::IVec3;
 
-use crate::render_plugin::{ChunkUpdate};
+use crate::render_plugin::ChunkUpdate;
 
 use super::chunk::Vertex;
 

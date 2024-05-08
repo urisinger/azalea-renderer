@@ -1,10 +1,10 @@
-use std::{array, slice::SliceIndex};
+use std::array;
 
 use azalea::{
     app::Plugin,
     chunks::ReceiveChunkEvent,
     core::{
-        position::{ChunkPos, ChunkSectionBlockPos},
+        position::{ChunkPos, ChunkSectionBlockPos, ChunkSectionPos},
         tick::GameTick,
     },
     world::Chunk,
@@ -30,13 +30,20 @@ impl ChunkUpdate {
     //BlockPos is relative to the chunk
     pub fn get_block(&self, pos: BlockPos, section_y: usize) -> Option<azalea::blocks::BlockState> {
         let chunk_pos = ChunkPos::from(pos);
+        let y_offset = pos.y >> 4;
+
         let pos = ChunkSectionBlockPos::from(pos);
         if let Some(chunk_idx) = offset_to_index(chunk_pos) {
-            self.neighbers[chunk_idx]
-                .as_ref()
-                .map(|c| c.sections.get(section_y).map(|s| s.get(pos)))?
+            self.neighbers[chunk_idx].as_ref().map(|c| {
+                c.sections
+                    .get((section_y as i32 + y_offset).max(0) as usize)
+                    .map(|s| s.get(pos))
+            })?
         } else {
-            self.chunk.sections.get(section_y).map(|c| c.get(pos))
+            self.chunk
+                .sections
+                .get((section_y as i32 + y_offset) as usize)
+                .map(|c| c.get(pos))
         }
     }
 }
