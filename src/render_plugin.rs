@@ -49,7 +49,9 @@ impl ChunkUpdate {
 }
 
 #[derive(Debug, Resource)]
-pub struct ChunkSender(pub flume::Sender<ChunkUpdate>);
+pub struct ChunkSender {
+    pub urgent_updates: flume::Sender<ChunkUpdate>,
+}
 
 pub struct RenderPlugin {
     pub sender: flume::Sender<ChunkUpdate>,
@@ -58,7 +60,7 @@ pub struct RenderPlugin {
 impl Plugin for RenderPlugin {
     fn build(&self, app: &mut azalea::app::App) {
         app.insert_resource(ChunkSender {
-            0: self.sender.clone(),
+            urgent_updates: self.sender.clone(),
         })
         .add_systems(
             GameTick,
@@ -108,22 +110,47 @@ fn send_chunks_system(
 
         let instance = local_player.instance.read();
 
+        let neighbers = array::from_fn(|i| {
+            instance
+                .chunks
+                .get(&(pos + index_to_offset(i).expect("index should always be less then 8")))
+                .map(|c| c.read().clone())
+        });
+
+        //Send non urgent update(update to neighbor chunks)
+        neighbers
+            .iter()
+            .enumerate()
+            .filter_map(|(i, c)| c.as_ref().map(|c| (i, c)))
+            .for_each(|(i, c)| {
+                let pos = pos + index_to_offset(i).expect("index should always be less then 0");
+                let neighbers = array::from_fn(|i| {
+                    instance
+                        .chunks
+                        .get(
+                            &(pos
+                                + index_to_offset(i).expect("index should always be less then 8")),
+                        )
+                        .map(|c| c.read().clone())
+                });
+
+                sender
+                    .urgent_updates
+                    .send(ChunkUpdate {
+                        pos,
+                        chunk: c.clone(),
+                        neighbers,
+                    })
+                    .unwrap();
+            });
+
         if let Some(chunk) = instance.chunks.get(&pos) {
             sender
-                .0
+                .urgent_updates
                 .send(ChunkUpdate {
                     pos,
                     chunk: chunk.read().clone(),
-                    neighbers: array::from_fn(|i| {
-                        instance
-                            .chunks
-                            .get(
-                                &(pos
-                                    + index_to_offset(i)
-                                        .expect("index should always be less then 8")),
-                            )
-                            .map(|c| c.read().clone())
-                    }),
+                    neighbers,
                 })
                 .unwrap();
         } else {

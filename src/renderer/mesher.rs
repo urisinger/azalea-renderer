@@ -4,7 +4,10 @@ use std::{
 };
 
 use azalea::{
-    core::{direction::Direction, position::ChunkSectionPos},
+    core::{
+        direction::Direction,
+        position::{ChunkSectionPos, Offset},
+    },
     BlockPos,
 };
 use glam::IVec3;
@@ -89,6 +92,7 @@ pub fn mesh_section(pos: ChunkSectionPos, update: &ChunkUpdate) -> MeshUpdate {
                             vertices.push(Vertex {
                                 position: (offset + glam::IVec3::new(x as i32, y as i32, z as i32))
                                     .into(),
+                                ao: compute_ao(block_pos, pos.y as usize, offset, normal, update),
                             });
                         }
                         indices.extend_from_slice(&[
@@ -104,6 +108,7 @@ pub fn mesh_section(pos: ChunkSectionPos, update: &ChunkUpdate) -> MeshUpdate {
             }
         }
     }
+
     MeshUpdate {
         pos,
         indices,
@@ -111,6 +116,94 @@ pub fn mesh_section(pos: ChunkSectionPos, update: &ChunkUpdate) -> MeshUpdate {
     }
 }
 
+fn compute_ao(
+    pos: BlockPos,
+    section_y: usize,
+    offset: glam::IVec3,
+    face_normal: Offset,
+    update: &ChunkUpdate,
+) -> u32 {
+    let ao = if face_normal.x != 0 {
+        let side1 = update
+            .get_block(
+                pos + BlockPos::new(offset.x * 2 - 1, 0, offset.z * 2 - 1),
+                section_y,
+            )
+            .is_some_and(|b| !b.is_air());
+
+        let side2 = update
+            .get_block(
+                pos + BlockPos::new(offset.x * 2 - 1, offset.y * 2 - 1, 0),
+                section_y,
+            )
+            .is_some_and(|b| !b.is_air());
+
+        let corner = update
+            .get_block(
+                pos + BlockPos::new(offset.x * 2 - 1, offset.y * 2 - 1, offset.z * 2 - 1),
+                section_y,
+            )
+            .is_some_and(|b| !b.is_air());
+
+        ao(side1, side2, corner)
+    } else if face_normal.y != 0 {
+        let side1 = update
+            .get_block(
+                pos + BlockPos::new(0, offset.y * 2 - 1, offset.z * 2 - 1),
+                section_y,
+            )
+            .is_some_and(|b| !b.is_air());
+
+        let side2 = update
+            .get_block(
+                pos + BlockPos::new(offset.x * 2 - 1, offset.y * 2 - 1, 0),
+                section_y,
+            )
+            .is_some_and(|b| !b.is_air());
+
+        let corner = update
+            .get_block(
+                pos + BlockPos::new(offset.x * 2 - 1, offset.y * 2 - 1, offset.z * 2 - 1),
+                section_y,
+            )
+            .is_some_and(|b| !b.is_air());
+
+        ao(side1, side2, corner)
+    } else {
+        let side1 = update
+            .get_block(
+                pos + BlockPos::new(0, offset.y * 2 - 1, offset.z * 2 - 1),
+                section_y,
+            )
+            .is_some_and(|b| !b.is_air());
+
+        let side2 = update
+            .get_block(
+                pos + BlockPos::new(offset.x * 2 - 1, 0, offset.z * 2 - 1),
+                section_y,
+            )
+            .is_some_and(|b| !b.is_air());
+
+        let corner = update
+            .get_block(
+                pos + BlockPos::new(offset.x * 2 - 1, offset.y * 2 - 1, offset.z * 2 - 1),
+                section_y,
+            )
+            .is_some_and(|b| !b.is_air());
+
+        ao(side1, side2, corner)
+    };
+
+    ao
+}
+
+fn ao(side1: bool, side2: bool, corner: bool) -> u32 {
+    if side1 && side2 {
+        0
+    } else {
+        3 - ((side1 || side2) as u32 + corner as u32)
+    }
+}
 struct Face {
     offsets: [IVec3; 4],
     dir: Direction,
