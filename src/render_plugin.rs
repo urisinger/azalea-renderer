@@ -1,4 +1,4 @@
-use std::array;
+use std::{array, time::Instant};
 
 use azalea::{
     app::Plugin,
@@ -101,6 +101,7 @@ fn send_chunks_system(
     sender: bevy_ecs::system::Res<ChunkSender>,
 ) {
     for event in events.read() {
+        let start = Instant::now();
         let pos = ChunkPos::new(event.packet.x, event.packet.z);
 
         let local_player = query.get(event.entity).unwrap();
@@ -127,7 +128,8 @@ fn send_chunks_system(
                 .unwrap();
         } else {
             error!("Expected chunk, but none found");
-            panic!();
         }
+
+        println!("Sending chunk took: {}", start.elapsed().as_secs_f32());
     }
 }
