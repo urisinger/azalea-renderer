@@ -36,7 +36,7 @@ impl ChunkUpdate {
         if let Some(chunk_idx) = offset_to_index(chunk_pos) {
             self.neighbers[chunk_idx].as_ref().map(|c| {
                 c.sections
-                    .get((section_y as i32 + y_offset).max(0) as usize)
+                    .get((section_y as i32 + y_offset) as usize)
                     .map(|s| s.get(pos))
             })?
         } else {

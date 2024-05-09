@@ -73,30 +73,22 @@ pub fn mesh_section(pos: ChunkSectionPos, update: &ChunkUpdate) -> MeshUpdate {
                     .is_some_and(|b| b.is_air())
                 {
                     for face in FACES {
-                        indices.extend_from_slice(&[
-                            vertices.len() as u16 + 0,
-                            vertices.len() as u16 + 1,
-                            vertices.len() as u16 + 2,
-                            vertices.len() as u16 + 0,
-                            vertices.len() as u16 + 2,
-                            vertices.len() as u16 + 3,
-                        ]);
+                        let len = vertices.len() as u16;
+
                         for offset in face.offsets {
-                            let normal = face.dir.inormal();
-                            let neighbor = BlockPos::new(x + normal.x, y + normal.y, z + normal.z);
-
-                            if !update
-                                .get_block(neighbor, pos.y as usize)
-                                .is_some_and(|b| b.is_air())
-                            {
-                                continue;
-                            }
-
                             vertices.push(Vertex {
                                 position: (offset + glam::IVec3::new(x as i32, y as i32, z as i32))
                                     .into(),
                             });
                         }
+                        indices.extend_from_slice(&[
+                            len + 0,
+                            len + 1,
+                            len + 2,
+                            len + 0,
+                            len + 2,
+                            len + 3,
+                        ]);
                     }
                 }
             }
