@@ -6,7 +6,7 @@ edition = "2021"
 [dependencies]
 winit = { version = "0.29", features = ["rwh_05"] }
 log = "0.4"
-wgpu = "0.19.3"
+wgpu = "0.20.0"
 bytemuck = { version = "1.15.0", features = ["derive"] }
 image = "0.25.1"
 thiserror = "1.0.59"

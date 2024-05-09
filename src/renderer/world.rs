@@ -153,6 +153,9 @@ impl WorldRenderer {
                 module: &shader,
                 entry_point: "main_vs",
                 buffers: &[Vertex::desc()],
+                compilation_options: wgpu::PipelineCompilationOptions {
+                    ..Default::default()
+                },
             },
             fragment: Some(wgpu::FragmentState {
                 module: &shader,
@@ -162,6 +165,9 @@ impl WorldRenderer {
                     blend: Some(wgpu::BlendState::REPLACE),
                     write_mask: wgpu::ColorWrites::ALL,
                 })],
+                compilation_options: wgpu::PipelineCompilationOptions {
+                    ..Default::default()
+                },
             }),
             primitive: wgpu::PrimitiveState {
                 topology: wgpu::PrimitiveTopology::TriangleList,
