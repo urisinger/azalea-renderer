@@ -75,6 +75,16 @@ pub fn mesh_section(pos: ChunkSectionPos, update: &ChunkUpdate) -> MeshUpdate {
                     for face in FACES {
                         let len = vertices.len() as u16;
 
+                        let normal = face.dir.inormal();
+                        let neighbor = BlockPos::new(x + normal.x, y + normal.y, z + normal.z);
+
+                        if update
+                            .get_block(neighbor, pos.y as usize)
+                            .is_some_and(|b| !b.is_air())
+                        {
+                            continue;
+                        }
+
                         for offset in face.offsets {
                             vertices.push(Vertex {
                                 position: (offset + glam::IVec3::new(x as i32, y as i32, z as i32))
