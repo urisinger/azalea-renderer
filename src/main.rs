@@ -19,13 +19,19 @@ use log::*;
 mod render_plugin;
 mod renderer;
 
-async fn azlea_main(sender: flume::Sender<ChunkUpdate>) {
+async fn azlea_main(
+    main_updates: flume::Sender<ChunkUpdate>,
+    neighbor_updates: flume::Sender<ChunkUpdate>,
+) {
     let account = Account::offline("bot");
     println!("hi from tokio");
     ClientBuilder::new()
         .set_handler(handle)
         .set_state(State::default())
-        .add_plugins(RenderPlugin { sender })
+        .add_plugins(RenderPlugin {
+            main_updates,
+            neighbor_updates,
+        })
         .start(account, "localhost:13157")
         .await
         .unwrap();
@@ -47,25 +53,30 @@ async fn handle(bot: azalea::Client, event: azalea::Event, _state: State) -> any
 pub struct State;
 
 fn main() {
-    let (send, recv) = flume::unbounded();
+    let (main_sender, main_updates) = flume::unbounded();
+    let (neighbor_sender, neighbor_updates) = flume::unbounded();
+
     std::thread::spawn(move || {
         tokio::runtime::Builder::new_multi_thread()
             .enable_all()
             .build()
             .unwrap()
-            .block_on(azlea_main(send))
+            .block_on(azlea_main(main_sender, neighbor_sender))
     });
     tokio::runtime::Builder::new_current_thread()
         .build()
         .unwrap()
-        .block_on(main_render(recv));
+        .block_on(main_render(main_updates, neighbor_updates));
 }
 
-async fn main_render(reciver: flume::Receiver<ChunkUpdate>) {
+async fn main_render(
+    main_updates: flume::Receiver<ChunkUpdate>,
+    neighbor_updates: flume::Receiver<ChunkUpdate>,
+) {
     let event_loop = EventLoop::new().unwrap();
     let window = WindowBuilder::new().build(&event_loop).unwrap();
 
-    let mut renderer = Renderer::new(&window, reciver).await;
+    let mut renderer = Renderer::new(&window, main_updates, neighbor_updates).await;
 
     let mut last_render_time = Instant::now();
 

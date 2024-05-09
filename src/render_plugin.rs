@@ -4,7 +4,7 @@ use azalea::{
     app::Plugin,
     chunks::ReceiveChunkEvent,
     core::{
-        position::{ChunkPos, ChunkSectionBlockPos, ChunkSectionPos},
+        position::{ChunkPos, ChunkSectionBlockPos},
         tick::GameTick,
     },
     world::Chunk,
@@ -50,17 +50,20 @@ impl ChunkUpdate {
 
 #[derive(Debug, Resource)]
 pub struct ChunkSender {
-    pub urgent_updates: flume::Sender<ChunkUpdate>,
+    pub main_updates: flume::Sender<ChunkUpdate>,
+    pub neighbor_updates: flume::Sender<ChunkUpdate>,
 }
 
 pub struct RenderPlugin {
-    pub sender: flume::Sender<ChunkUpdate>,
+    pub main_updates: flume::Sender<ChunkUpdate>,
+    pub neighbor_updates: flume::Sender<ChunkUpdate>,
 }
 
 impl Plugin for RenderPlugin {
     fn build(&self, app: &mut azalea::app::App) {
         app.insert_resource(ChunkSender {
-            urgent_updates: self.sender.clone(),
+            main_updates: self.main_updates.clone(),
+            neighbor_updates: self.neighbor_updates.clone(),
         })
         .add_systems(
             GameTick,
@@ -135,7 +138,7 @@ fn send_chunks_system(
                 });
 
                 sender
-                    .urgent_updates
+                    .neighbor_updates
                     .send(ChunkUpdate {
                         pos,
                         chunk: c.clone(),
@@ -146,7 +149,7 @@ fn send_chunks_system(
 
         if let Some(chunk) = instance.chunks.get(&pos) {
             sender
-                .urgent_updates
+                .main_updates
                 .send(ChunkUpdate {
                     pos,
                     chunk: chunk.read().clone(),

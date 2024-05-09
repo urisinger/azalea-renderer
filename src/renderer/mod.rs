@@ -36,7 +36,11 @@ pub struct Renderer<'a> {
 }
 
 impl<'a> Renderer<'a> {
-    pub async fn new(window: &'a Window, reciver: flume::Receiver<ChunkUpdate>) -> Self {
+    pub async fn new(
+        window: &'a Window,
+        main_updates: flume::Receiver<ChunkUpdate>,
+        neighbor_updates: flume::Receiver<ChunkUpdate>,
+    ) -> Self {
         let state = State::new_async(window).await;
 
         let world_renderer =
@@ -44,7 +48,7 @@ impl<'a> Renderer<'a> {
 
         let camera_controller = CameraController::new(15.0, 0.5);
 
-        let camera = Camera::new((0.0, 64.0, 0.0), 0.0f32.to_radians(), 0.0f32.to_radians());
+        let camera = Camera::new((0.0, 128.0, 0.0), 0.0f32.to_radians(), 0.0f32.to_radians());
 
         let projection = Projection::new(
             state.main_window.config.width,
@@ -61,7 +65,7 @@ impl<'a> Renderer<'a> {
             projection,
             camera_controller,
 
-            mesher: Mesher::new(reciver),
+            mesher: Mesher::new(main_updates, neighbor_updates),
         }
     }
 

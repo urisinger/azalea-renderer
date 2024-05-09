@@ -30,11 +30,14 @@ pub struct Mesher {
 }
 
 impl Mesher {
-    pub fn new(reciver: flume::Receiver<ChunkUpdate>) -> Self {
+    pub fn new(
+        main_updates: flume::Receiver<ChunkUpdate>,
+        neighbor_updates: flume::Receiver<ChunkUpdate>,
+    ) -> Self {
         let (section_send, section_recv) = flume::unbounded();
 
-        let chunk_thread = thread::spawn(move || {
-            for update in reciver.iter() {
+        let chunk_thread = thread::spawn(move || loop {
+            for update in main_updates.try_iter() {
                 let time = Instant::now();
 
                 for y in 0..update.chunk.sections.len() {
@@ -47,6 +50,28 @@ impl Mesher {
                 }
 
                 println!("Meshing chunk took: {}", time.elapsed().as_secs_f32());
+            }
+
+            for update in neighbor_updates.try_iter() {
+                let time = Instant::now();
+
+                for y in 0..update.chunk.sections.len() {
+                    let pos = ChunkSectionPos::new(update.pos.x, y as i32, update.pos.z);
+
+                    let render_chunk = mesh_section(pos, &update);
+                    section_send
+                        .send(render_chunk)
+                        .expect("Client disconnected, panicing.");
+                }
+
+                println!(
+                    "Meshing neighbor chunk took: {}",
+                    time.elapsed().as_secs_f32()
+                );
+
+                if !main_updates.is_empty() {
+                    break;
+                }
             }
         });
 
