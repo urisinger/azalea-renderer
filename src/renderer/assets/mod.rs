@@ -5,16 +5,14 @@ pub mod texture;
 
 use texture::Texture;
 
-use std::{
-    collections::{hash_map, HashMap},
-    fs,
-    io::BufReader,
-    path::PathBuf,
-};
+use std::{collections::HashMap, error::Error, fs, io::BufReader, path::PathBuf};
 
 use log::*;
 
-use self::model::{BlockModel, Cube};
+use self::{
+    block_state::BlockRenderState,
+    model::{BlockModel, Cube},
+};
 
 pub struct BlockModelRef<'a> {
     pub ambient_occlusion: bool,
@@ -32,6 +30,8 @@ pub struct LoadedAssets {
 
     block_models: HashMap<String, BlockModel>,
 
+    block_states: HashMap<String, BlockRenderState>,
+
     path: PathBuf,
 }
 
@@ -41,6 +41,7 @@ impl LoadedAssets {
         let mut this = Self {
             texture_to_id: HashMap::new(),
             textures: Vec::new(),
+            block_states: HashMap::new(),
             block_models: HashMap::new(),
             path: path.clone(),
         };
@@ -58,11 +59,6 @@ impl LoadedAssets {
 
             let mut name = "textures/".to_string();
 
-            println!(
-                "adding texture: {}, from path: {}",
-                path.to_str().unwrap(),
-                texture_path.to_string_lossy()
-            );
             name.push_str(
                 path.strip_prefix(&texture_path)
                     .unwrap()
@@ -77,10 +73,48 @@ impl LoadedAssets {
         }
 
         let model_path = path.join("models");
-        for path in fs::read_dir(&model_path).unwrap() {
-            let path = path.unwrap().path();
+        for path in walkdir::WalkDir::new(&model_path) {
+            let path = path.unwrap().path().to_owned();
+
+            if !path.is_file() || !path.extension().map_or(false, |e| e == "json") {
+                continue;
+            }
+
             let mut name = "models/".to_string();
+            info!(
+                "adding model: {}, from path: {}",
+                path.to_str().unwrap(),
+                model_path.to_string_lossy()
+            );
             name.push_str(path.strip_prefix(&model_path).unwrap().to_str().unwrap());
+
+            let s = fs::read_to_string(path).unwrap();
+            this.add_block_model(BlockModel::from_str(&s).unwrap(), name);
+        }
+
+        let block_state_path = path.join("blockstates");
+        for path in walkdir::WalkDir::new(&block_state_path) {
+            let path = path.unwrap().path().to_owned();
+
+            if !path.is_file() || !path.extension().map_or(false, |e| e == "json") {
+                continue;
+            }
+
+            let mut name = "blockstates/".to_string();
+            info!(
+                "adding blockstate: {}, from path: {}\n",
+                path.to_str().unwrap(),
+                model_path.to_string_lossy()
+            );
+            name.push_str(
+                path.strip_prefix(&block_state_path)
+                    .unwrap()
+                    .to_str()
+                    .unwrap(),
+            );
+
+            let s = fs::read_to_string(path).unwrap();
+            this.add_block_state(BlockRenderState::from_str(&s).unwrap(), name);
         }
 
         this
@@ -93,6 +127,18 @@ impl LoadedAssets {
 
     pub fn get_texture_id(&self, name: &str) -> Option<usize> {
         self.texture_to_id.get(name).copied()
+    }
+
+    pub fn add_block_state(&mut self, block_state: BlockRenderState, name: String) {
+        self.block_states.insert(name, block_state);
+    }
+
+    pub fn get_block_state(&self, name: &str) -> Option<&BlockRenderState> {
+        self.block_states.get(name)
+    }
+
+    pub fn add_block_model(&mut self, model: BlockModel, name: String) {
+        self.block_models.insert(name, model);
     }
 
     pub fn get_block_model<'a>(&'a self, name: &str) -> Option<BlockModelRef<'a>> {
@@ -109,15 +155,15 @@ impl LoadedAssets {
                     elements: &block_model.elements,
                     assets: self,
                 }),
-                None => Some(BlockModelRef {
+
+                Some(None) => None,
+                _ => Some(BlockModelRef {
                     ambient_occlusion: block_model.ambientocclusion,
                     parent: None,
                     textures: &block_model.textures,
                     elements: &block_model.elements,
                     assets: self,
                 }),
-
-                Some(None) => None,
             }
         } else {
             None

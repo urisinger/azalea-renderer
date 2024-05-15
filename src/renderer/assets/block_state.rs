@@ -1,14 +1,24 @@
+use serde::{de::IgnoredAny, Deserializer};
+
 #[derive(serde::Deserialize, Debug)]
 pub enum BlockRenderState {
     #[serde(rename = "variants")]
     Variants(Variants),
 
-    #[serde(rename = "multi_part")]
-    MultiPart(()),
+    #[serde(rename = "multipart", deserialize_with = "deserialize_multipart")]
+    MultiPart,
+}
+
+fn deserialize_multipart<'de, D>(data: D) -> Result<(), D::Error>
+where
+    D: Deserializer<'de>,
+{
+    data.deserialize_ignored_any(IgnoredAny)?;
+    Ok(())
 }
 
 impl BlockRenderState {
-    fn from_str(s: &str) -> serde_json::Result<Self> {
+    pub fn from_str(s: &str) -> serde_json::Result<Self> {
         serde_json::from_str(s)
     }
 }

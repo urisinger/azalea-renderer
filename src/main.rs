@@ -41,7 +41,6 @@ async fn handle(bot: azalea::Client, event: azalea::Event, _state: State) -> any
     match event {
         azalea::Event::Chat(m) => {
             println!("{}", m.message().to_ansi());
-            bot.goto(BlockPosGoal(BlockPos::new(1000, 64, 1000)))
         }
         _ => {}
     }

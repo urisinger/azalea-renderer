@@ -1,4 +1,4 @@
-use std::time::Duration;
+use std::{sync::Arc, time::Duration};
 
 use state::State;
 use winit::{
@@ -35,7 +35,7 @@ pub struct Renderer<'a> {
 
     mesher: Mesher,
 
-    assets: LoadedAssets,
+    assets: Arc<LoadedAssets>,
 }
 
 impl<'a> Renderer<'a> {
@@ -45,11 +45,12 @@ impl<'a> Renderer<'a> {
         neighbor_updates: flume::Receiver<ChunkUpdate>,
     ) -> Self {
         let state = State::new_async(window).await;
-        let assets = LoadedAssets::from_path(
+        let assets = Arc::new(LoadedAssets::from_path(
             &state.device,
             &state.queue,
             "/home/uri_singer/Downloads/assets/minecraft/",
-        );
+        ));
+
         let world_renderer =
             WorldRenderer::new(&state.device, &state.queue, &state.main_window.config).unwrap();
 
@@ -72,7 +73,7 @@ impl<'a> Renderer<'a> {
             projection,
             camera_controller,
 
-            mesher: Mesher::new(main_updates, neighbor_updates),
+            mesher: Mesher::new(main_updates, neighbor_updates, assets.clone()),
 
             assets,
         }

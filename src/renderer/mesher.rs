@@ -1,4 +1,5 @@
 use std::{
+    sync::Arc,
     thread::{self, JoinHandle},
     time::Instant,
 };
@@ -8,13 +9,14 @@ use azalea::{
         direction::Direction,
         position::{ChunkSectionPos, Offset},
     },
+    physics::collision::BlockWithShape,
     BlockPos,
 };
 use glam::IVec3;
 
 use crate::render_plugin::ChunkUpdate;
 
-use super::chunk::Vertex;
+use super::{assets::LoadedAssets, chunk::Vertex};
 
 pub struct MeshUpdate {
     pub pos: ChunkSectionPos,
@@ -33,44 +35,40 @@ impl Mesher {
     pub fn new(
         main_updates: flume::Receiver<ChunkUpdate>,
         neighbor_updates: flume::Receiver<ChunkUpdate>,
+        assets: Arc<LoadedAssets>,
     ) -> Self {
         let (section_send, section_recv) = flume::unbounded();
 
         let chunk_thread = thread::spawn(move || loop {
-            for update in main_updates.try_iter() {
-                let time = Instant::now();
+            loop {
+                for update in main_updates.try_iter() {
+                    let time = Instant::now();
 
-                for y in 0..update.chunk.sections.len() {
-                    let pos = ChunkSectionPos::new(update.pos.x, y as i32, update.pos.z);
+                    for y in 0..update.chunk.sections.len() {
+                        let pos = ChunkSectionPos::new(update.pos.x, y as i32, update.pos.z);
 
-                    let render_chunk = mesh_section(pos, &update);
-                    section_send
-                        .send(render_chunk)
-                        .expect("Client disconnected, panicing.");
+                        let render_chunk = mesh_section(pos, &update, assets.clone());
+                        section_send
+                            .send(render_chunk)
+                            .expect("Client disconnected, panicing.");
+                    }
+
+                    println!("Meshing chunk took: {}", time.elapsed().as_secs_f32());
                 }
 
-                println!("Meshing chunk took: {}", time.elapsed().as_secs_f32());
-            }
+                for update in neighbor_updates.try_iter() {
+                    for y in 0..update.chunk.sections.len() {
+                        let pos = ChunkSectionPos::new(update.pos.x, y as i32, update.pos.z);
 
-            for update in neighbor_updates.try_iter() {
-                let time = Instant::now();
+                        let render_chunk = mesh_section(pos, &update, assets.clone());
+                        section_send
+                            .send(render_chunk)
+                            .expect("Client disconnected, panicing.");
+                    }
 
-                for y in 0..update.chunk.sections.len() {
-                    let pos = ChunkSectionPos::new(update.pos.x, y as i32, update.pos.z);
-
-                    let render_chunk = mesh_section(pos, &update);
-                    section_send
-                        .send(render_chunk)
-                        .expect("Client disconnected, panicing.");
-                }
-
-                println!(
-                    "Meshing neighbor chunk took: {}",
-                    time.elapsed().as_secs_f32()
-                );
-
-                if !main_updates.is_empty() {
-                    break;
+                    if !main_updates.is_empty() {
+                        break;
+                    }
                 }
             }
         });
@@ -86,7 +84,11 @@ impl Mesher {
     }
 }
 
-pub fn mesh_section(pos: ChunkSectionPos, update: &ChunkUpdate) -> MeshUpdate {
+pub fn mesh_section(
+    pos: ChunkSectionPos,
+    update: &ChunkUpdate,
+    assets: Arc<LoadedAssets>,
+) -> MeshUpdate {
     let mut vertices = Vec::new();
     let mut indices = Vec::new();
 
@@ -96,10 +98,9 @@ pub fn mesh_section(pos: ChunkSectionPos, update: &ChunkUpdate) -> MeshUpdate {
             for z in 0..16 {
                 let block_pos = BlockPos::new(x, y, z);
 
-                if !update
-                    .get_block(block_pos, pos.y as usize)
-                    .is_some_and(|b| b.is_air())
-                {
+                let block = update.get_block(block_pos, pos.y as usize).unwrap();
+
+                if !block.is_air() {
                     for face in FACES {
                         let len = vertices.len() as u16;
 
@@ -154,21 +155,21 @@ fn compute_ao(
                 pos + BlockPos::new(offset.x * 2 - 1, 0, offset.z * 2 - 1),
                 section_y,
             )
-            .is_some_and(|b| !b.is_air());
+            .is_some_and(|b| b.is_shape_full());
 
         let side2 = update
             .get_block(
                 pos + BlockPos::new(offset.x * 2 - 1, offset.y * 2 - 1, 0),
                 section_y,
             )
-            .is_some_and(|b| !b.is_air());
+            .is_some_and(|b| b.is_shape_full());
 
         let corner = update
             .get_block(
                 pos + BlockPos::new(offset.x * 2 - 1, offset.y * 2 - 1, offset.z * 2 - 1),
                 section_y,
             )
-            .is_some_and(|b| !b.is_air());
+            .is_some_and(|b| b.is_shape_full());
 
         ao(side1, side2, corner)
     } else if face_normal.y != 0 {
@@ -177,21 +178,21 @@ fn compute_ao(
                 pos + BlockPos::new(0, offset.y * 2 - 1, offset.z * 2 - 1),
                 section_y,
             )
-            .is_some_and(|b| !b.is_air());
+            .is_some_and(|b| b.is_shape_full());
 
         let side2 = update
             .get_block(
                 pos + BlockPos::new(offset.x * 2 - 1, offset.y * 2 - 1, 0),
                 section_y,
             )
-            .is_some_and(|b| !b.is_air());
+            .is_some_and(|b| b.is_shape_full());
 
         let corner = update
             .get_block(
                 pos + BlockPos::new(offset.x * 2 - 1, offset.y * 2 - 1, offset.z * 2 - 1),
                 section_y,
             )
-            .is_some_and(|b| !b.is_air());
+            .is_some_and(|b| b.is_shape_full());
 
         ao(side1, side2, corner)
     } else {
@@ -200,21 +201,21 @@ fn compute_ao(
                 pos + BlockPos::new(0, offset.y * 2 - 1, offset.z * 2 - 1),
                 section_y,
             )
-            .is_some_and(|b| !b.is_air());
+            .is_some_and(|b| b.is_shape_full());
 
         let side2 = update
             .get_block(
                 pos + BlockPos::new(offset.x * 2 - 1, 0, offset.z * 2 - 1),
                 section_y,
             )
-            .is_some_and(|b| !b.is_air());
+            .is_some_and(|b| b.is_shape_full());
 
         let corner = update
             .get_block(
                 pos + BlockPos::new(offset.x * 2 - 1, offset.y * 2 - 1, offset.z * 2 - 1),
                 section_y,
             )
-            .is_some_and(|b| !b.is_air());
+            .is_some_and(|b| b.is_shape_full());
 
         ao(side1, side2, corner)
     };

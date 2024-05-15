@@ -15,11 +15,17 @@ fn r#true() -> bool {
     true
 }
 
+impl BlockModel {
+    pub fn from_str(s: &str) -> serde_json::Result<Self> {
+        serde_json::from_str(s)
+    }
+}
+
 #[derive(serde::Deserialize, Debug)]
 pub struct Display {
-    rotation: glam::Vec3,
-    translation: glam::Vec3,
-    scale: glam::Vec3,
+    rotation: Option<glam::Vec3>,
+    translation: Option<glam::Vec3>,
+    scale: Option<glam::Vec3>,
 }
 
 #[derive(serde::Deserialize, Debug)]

@@ -10,6 +10,8 @@ fn main() {
 
     println!("cargo:rerun-if-changed=shaders/Cargo.toml");
 
+    println!("cargo:rerun-if-changed=shaders/.cargo");
+
     std::env::set_current_dir(concat!(env!("CARGO_MANIFEST_DIR"), "/shaders")).unwrap();
     let output = Command::new("cargo")
         .args([

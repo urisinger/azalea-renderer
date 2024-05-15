@@ -1,5 +1,5 @@
 [build]
-target = "spirv-unknown-spv1.3"
+target = "spirv-vulkan-spv1.2"
 rustflags = [
     "-Zcodegen-backend=librustc_codegen_spirv.so",
     "-Zbinary-dep-depinfo",
