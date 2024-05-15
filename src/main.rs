@@ -24,7 +24,7 @@ async fn azlea_main(
     neighbor_updates: flume::Sender<ChunkUpdate>,
 ) {
     let account = Account::offline("bot");
-    println!("hi from tokio");
+
     ClientBuilder::new()
         .set_handler(handle)
         .set_state(State::default())

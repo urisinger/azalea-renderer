@@ -15,11 +15,11 @@ use self::{
     world::WorldRenderer,
 };
 
+pub mod assets;
 mod camera;
 mod chunk;
 mod mesher;
 mod state;
-mod texture;
 mod world;
 
 pub struct Renderer<'a> {

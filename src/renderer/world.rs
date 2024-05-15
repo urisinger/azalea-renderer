@@ -1,9 +1,9 @@
 use std::{collections::HashMap, fs, io::BufReader, num::NonZeroU64};
 
 use super::{
+    assets::texture::Texture,
     chunk::{RenderChunk, Vertex},
     mesher::MeshUpdate,
-    texture::Texture,
 };
 
 pub struct World {
