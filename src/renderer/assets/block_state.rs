@@ -47,8 +47,7 @@ mod tests {
     fn deserialize_test() {
         {
             _ = BlockRenderState::from_str(
-                r#"
-{
+                r#"{
     "variants": {
         "snowy=false": [
             { "model": "block/grass_block" },
@@ -58,8 +57,7 @@ mod tests {
         ],
         "snowy=true":  { "model": "block/grass_block_snow" }
     }
-}
-                "#,
+}"#,
             )
             .unwrap();
         }

@@ -10,6 +10,7 @@ use winit::{
 use crate::render_plugin::ChunkUpdate;
 
 use self::{
+    assets::LoadedAssets,
     camera::{Camera, CameraController, Projection},
     mesher::Mesher,
     world::WorldRenderer,
@@ -33,6 +34,8 @@ pub struct Renderer<'a> {
     pub camera_controller: CameraController,
 
     mesher: Mesher,
+
+    assets: LoadedAssets,
 }
 
 impl<'a> Renderer<'a> {
@@ -42,7 +45,11 @@ impl<'a> Renderer<'a> {
         neighbor_updates: flume::Receiver<ChunkUpdate>,
     ) -> Self {
         let state = State::new_async(window).await;
-
+        let assets = LoadedAssets::from_path(
+            &state.device,
+            &state.queue,
+            "/home/uri_singer/Downloads/assets/minecraft/",
+        );
         let world_renderer =
             WorldRenderer::new(&state.device, &state.queue, &state.main_window.config).unwrap();
 
@@ -66,6 +73,8 @@ impl<'a> Renderer<'a> {
             camera_controller,
 
             mesher: Mesher::new(main_updates, neighbor_updates),
+
+            assets,
         }
     }
 
