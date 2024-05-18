@@ -22,6 +22,7 @@ pub fn main_vs(
     in_pos: glam::Vec3,
     in_ao: u32,
     tex_idx: u32,
+    in_uv: glam::Vec2,
 
     out_uv: &mut glam::Vec2,
     out_ao: &mut f32,
@@ -41,7 +42,7 @@ pub fn main_vs(
 
     const AO_TABLE: [f32; 4] = [0.1, 0.25, 0.4, 1.0];
 
-    *out_uv = ID_TO_UV[vertex_id as usize];
+    *out_uv = in_uv;
     *out_pos = world_uniform.view_proj * (in_pos + chunk_uniform.pos.as_vec3() * 16.0).extend(1.0);
     *out_ao = AO_TABLE[in_ao as usize];
     *out_tex_idx = tex_idx;

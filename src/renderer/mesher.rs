@@ -15,7 +15,7 @@ use azalea::{
     physics::collision::BlockWithShape,
     BlockPos,
 };
-use glam::IVec3;
+use glam::{IVec2, IVec3};
 
 use crate::render_plugin::ChunkUpdate;
 
@@ -65,7 +65,7 @@ impl Mesher {
                             .expect("Client disconnected, panicing.");
                     }
 
-                    println!("Meshing chunk took: {}", time.elapsed().as_secs_f32());
+                    info!("Meshing chunk took: {}", time.elapsed().as_secs_f32());
                 }
 
                 for update in neighbor_updates.try_iter() {
@@ -115,13 +115,6 @@ pub fn mesh_section(
                 let dyn_block = Box::<dyn Block>::from(block);
 
                 let block_state = assets.get_block_state(&format!("block/{}", dyn_block.id()));
-
-                if block.is_air()
-                    || dyn_block.as_registry_block() == azalea::registry::Block::Water
-                    || dyn_block.as_registry_block() == azalea::registry::Block::Lava
-                {
-                    continue;
-                }
 
                 match block_state {
                     Some(BlockRenderState::Variants(variants)) => {
@@ -199,7 +192,10 @@ pub fn mesh_section(
                                                         continue;
                                                     }
 
-                                                    for offset in face.offsets {
+                                                    let uvs = generate_uv(face.dir, model_face.uv);
+                                                    for (i, offset) in
+                                                        face.offsets.iter().enumerate()
+                                                    {
                                                         let tex_idx = model
                                                             .get_texture(&model_face.texture)
                                                             .map(|name| {
@@ -216,7 +212,7 @@ pub fn mesh_section(
 
                                                         vertices.push(Vertex {
                                                             position: (offset_to_coord(
-                                                                offset, element,
+                                                                *offset, element,
                                                             ) / 16.0
                                                                 + glam::Vec3::new(
                                                                     x as f32, y as f32, z as f32,
@@ -226,7 +222,7 @@ pub fn mesh_section(
                                                                 compute_ao(
                                                                     block_pos,
                                                                     pos.y as usize,
-                                                                    offset,
+                                                                    *offset,
                                                                     normal,
                                                                     update,
                                                                 )
@@ -234,6 +230,7 @@ pub fn mesh_section(
                                                                 3
                                                             },
                                                             tex_idx: tex_idx.unwrap_or(0) as u32,
+                                                            uv: uvs[i].into(),
                                                         });
                                                     }
                                                     indices.extend_from_slice(&[
@@ -268,6 +265,87 @@ pub fn mesh_section(
         pos,
         indices,
         vertices,
+    }
+}
+
+fn generate_uv(dir: Direction, uvs: Option<[f32; 4]>) -> [glam::Vec2; 4] {
+    match uvs {
+        Some(uvs) => match dir {
+            Direction::Up => [
+                glam::Vec2::new(uvs[0] / 16.0, uvs[1] / 16.0),
+                glam::Vec2::new(uvs[2] / 16.0, uvs[1] / 16.0),
+                glam::Vec2::new(uvs[2] / 16.0, uvs[3] / 16.0),
+                glam::Vec2::new(uvs[0] / 16.0, uvs[3] / 16.0),
+            ],
+            Direction::Down => [
+                glam::Vec2::new(uvs[0] / 16.0, uvs[1] / 16.0),
+                glam::Vec2::new(uvs[2] / 16.0, uvs[1] / 16.0),
+                glam::Vec2::new(uvs[2] / 16.0, uvs[3] / 16.0),
+                glam::Vec2::new(uvs[0] / 16.0, uvs[3] / 16.0),
+            ],
+            Direction::North => [
+                glam::Vec2::new(uvs[0] / 16.0, uvs[3] / 16.0),
+                glam::Vec2::new(uvs[0] / 16.0, uvs[1] / 16.0),
+                glam::Vec2::new(uvs[2] / 16.0, uvs[1] / 16.0),
+                glam::Vec2::new(uvs[2] / 16.0, uvs[3] / 16.0),
+            ],
+            Direction::South => [
+                glam::Vec2::new(uvs[0] / 16.0, uvs[3] / 16.0),
+                glam::Vec2::new(uvs[2] / 16.0, uvs[3] / 16.0),
+                glam::Vec2::new(uvs[2] / 16.0, uvs[1] / 16.0),
+                glam::Vec2::new(uvs[0] / 16.0, uvs[1] / 16.0),
+            ],
+            Direction::East => [
+                glam::Vec2::new(uvs[0] / 16.0, uvs[3] / 16.0),
+                glam::Vec2::new(uvs[0] / 16.0, uvs[1] / 16.0),
+                glam::Vec2::new(uvs[2] / 16.0, uvs[1] / 16.0),
+                glam::Vec2::new(uvs[2] / 16.0, uvs[3] / 16.0),
+            ],
+            Direction::West => [
+                glam::Vec2::new(uvs[0] / 16.0, uvs[3] / 16.0),
+                glam::Vec2::new(uvs[2] / 16.0, uvs[3] / 16.0),
+                glam::Vec2::new(uvs[2] / 16.0, uvs[1] / 16.0),
+                glam::Vec2::new(uvs[0] / 16.0, uvs[1] / 16.0),
+            ],
+        },
+        None => match dir {
+            Direction::Up => [
+                glam::Vec2::new(0.0, 0.0),
+                glam::Vec2::new(1.0, 0.0),
+                glam::Vec2::new(1.0, 1.0),
+                glam::Vec2::new(0.0, 1.0),
+            ],
+            Direction::Down => [
+                glam::Vec2::new(0.0, 0.0),
+                glam::Vec2::new(1.0, 0.0),
+                glam::Vec2::new(1.0, 1.0),
+                glam::Vec2::new(0.0, 1.0),
+            ],
+            Direction::North => [
+                glam::Vec2::new(0.0, 1.0),
+                glam::Vec2::new(0.0, 0.0),
+                glam::Vec2::new(1.0, 0.0),
+                glam::Vec2::new(1.0, 1.0),
+            ],
+            Direction::South => [
+                glam::Vec2::new(0.0, 1.0),
+                glam::Vec2::new(1.0, 1.0),
+                glam::Vec2::new(1.0, 0.0),
+                glam::Vec2::new(0.0, 0.0),
+            ],
+            Direction::East => [
+                glam::Vec2::new(0.0, 1.0),
+                glam::Vec2::new(0.0, 0.0),
+                glam::Vec2::new(1.0, 0.0),
+                glam::Vec2::new(1.0, 1.0),
+            ],
+            Direction::West => [
+                glam::Vec2::new(0.0, 1.0),
+                glam::Vec2::new(1.0, 1.0),
+                glam::Vec2::new(1.0, 0.0),
+                glam::Vec2::new(0.0, 0.0),
+            ],
+        },
     }
 }
 

@@ -8,11 +8,12 @@ pub struct Vertex {
     pub position: [f32; 3],
     pub ao: u32,
     pub tex_idx: u32,
+    pub uv: [f32; 2],
 }
 
 impl Vertex {
-    const ATTRIBS: [wgpu::VertexAttribute; 3] =
-        wgpu::vertex_attr_array![0 => Float32x3, 1 => Uint32, 2 => Uint32, ];
+    const ATTRIBS: [wgpu::VertexAttribute; 4] =
+        wgpu::vertex_attr_array![0 => Float32x3, 1 => Uint32, 2 => Uint32, 3 => Float32x2];
 
     pub fn desc() -> wgpu::VertexBufferLayout<'static> {
         use std::mem;
