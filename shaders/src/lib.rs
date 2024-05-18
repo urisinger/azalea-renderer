@@ -1,4 +1,7 @@
 #![no_std]
+#![feature(asm_experimental_arch)]
+use core::arch::asm;
+
 use spirv_std::*;
 
 #[repr(C)]
@@ -30,10 +33,10 @@ pub fn main_vs(
 ) {
     let vertex_id = id % 4;
     const ID_TO_UV: [glam::Vec2; 4] = [
-        glam::Vec2 { x: 1.0, y: 0.0 },
-        glam::Vec2 { x: 1.0, y: 1.0 },
         glam::Vec2 { x: 0.0, y: 1.0 },
         glam::Vec2 { x: 0.0, y: 0.0 },
+        glam::Vec2 { x: 1.0, y: 0.0 },
+        glam::Vec2 { x: 1.0, y: 1.0 },
     ];
 
     const AO_TABLE: [f32; 4] = [0.1, 0.25, 0.4, 1.0];
@@ -57,10 +60,22 @@ pub fn main_fs(
     >,
     #[spirv(descriptor_set = 0, binding = 2)] samplers: &RuntimeArray<Sampler>,
 ) {
-    *out = unsafe {
+    let sampled = unsafe {
         textures
             .index(in_tex_idx as usize)
             .sample(*samplers.index(in_tex_idx as usize), in_uv)
-            * in_ao
     };
+
+    if sampled.w < 0.9 {
+        #[cfg(target_arch = "spirv")]
+        unsafe {
+            asm!(
+                "OpExtension \"SPV_EXT_demote_to_helper_invocation\"",
+                "OpCapability DemoteToHelperInvocationEXT",
+                "OpDemoteToHelperInvocationEXT"
+            );
+        }
+    }
+
+    *out = sampled * in_ao;
 }
