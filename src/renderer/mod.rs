@@ -51,8 +51,13 @@ impl<'a> Renderer<'a> {
             "/home/uri_singer/Downloads/assets/minecraft/",
         ));
 
-        let world_renderer =
-            WorldRenderer::new(&state.device, &state.queue, &state.main_window.config).unwrap();
+        let world_renderer = WorldRenderer::new(
+            &state.device,
+            &state.queue,
+            &state.main_window.config,
+            &assets,
+        )
+        .unwrap();
 
         let camera_controller = CameraController::new(15.0, 0.5);
 

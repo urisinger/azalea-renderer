@@ -5,13 +5,14 @@ use wgpu::util::DeviceExt;
 #[repr(C)]
 #[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct Vertex {
-    pub position: [i32; 3],
+    pub position: [f32; 3],
     pub ao: u32,
+    pub tex_idx: u32,
 }
 
 impl Vertex {
-    const ATTRIBS: [wgpu::VertexAttribute; 2] =
-        wgpu::vertex_attr_array![0 => Sint32x3, 1 => Uint32];
+    const ATTRIBS: [wgpu::VertexAttribute; 3] =
+        wgpu::vertex_attr_array![0 => Float32x3, 1 => Uint32, 2 => Uint32, ];
 
     pub fn desc() -> wgpu::VertexBufferLayout<'static> {
         use std::mem;

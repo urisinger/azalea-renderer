@@ -1,10 +1,13 @@
 use std::{
+    any::Any,
+    ops::Deref,
     sync::Arc,
     thread::{self, JoinHandle},
     time::Instant,
 };
 
 use azalea::{
+    blocks::Block,
     core::{
         direction::Direction,
         position::{ChunkSectionPos, Offset},
@@ -16,7 +19,16 @@ use glam::IVec3;
 
 use crate::render_plugin::ChunkUpdate;
 
-use super::{assets::LoadedAssets, chunk::Vertex};
+use super::{
+    assets::{
+        block_state::{BlockRenderState, Variant, VariantDesc, Variants},
+        model::Cube,
+        LoadedAssets,
+    },
+    chunk::Vertex,
+};
+
+use log::*;
 
 pub struct MeshUpdate {
     pub pos: ChunkSectionPos,
@@ -47,7 +59,7 @@ impl Mesher {
                     for y in 0..update.chunk.sections.len() {
                         let pos = ChunkSectionPos::new(update.pos.x, y as i32, update.pos.z);
 
-                        let render_chunk = mesh_section(pos, &update, assets.clone());
+                        let render_chunk = mesh_section(pos, &update, &assets);
                         section_send
                             .send(render_chunk)
                             .expect("Client disconnected, panicing.");
@@ -60,7 +72,7 @@ impl Mesher {
                     for y in 0..update.chunk.sections.len() {
                         let pos = ChunkSectionPos::new(update.pos.x, y as i32, update.pos.z);
 
-                        let render_chunk = mesh_section(pos, &update, assets.clone());
+                        let render_chunk = mesh_section(pos, &update, &assets);
                         section_send
                             .send(render_chunk)
                             .expect("Client disconnected, panicing.");
@@ -87,7 +99,7 @@ impl Mesher {
 pub fn mesh_section(
     pos: ChunkSectionPos,
     update: &ChunkUpdate,
-    assets: Arc<LoadedAssets>,
+    assets: &LoadedAssets,
 ) -> MeshUpdate {
     let mut vertices = Vec::new();
     let mut indices = Vec::new();
@@ -100,37 +112,154 @@ pub fn mesh_section(
 
                 let block = update.get_block(block_pos, pos.y as usize).unwrap();
 
-                if !block.is_air() {
-                    for face in FACES {
-                        let len = vertices.len() as u16;
+                let dyn_block = Box::<dyn Block>::from(block);
 
-                        let normal = face.dir.inormal();
-                        let neighbor = BlockPos::new(x + normal.x, y + normal.y, z + normal.z);
+                let block_state = assets.get_block_state(&format!("block/{}", dyn_block.id()));
 
-                        if update
-                            .get_block(neighbor, pos.y as usize)
-                            .is_some_and(|b| !b.is_air())
-                        {
-                            continue;
-                        }
-
-                        for offset in face.offsets {
-                            vertices.push(Vertex {
-                                position: (offset + glam::IVec3::new(x as i32, y as i32, z as i32))
-                                    .into(),
-                                ao: compute_ao(block_pos, pos.y as usize, offset, normal, update),
-                            });
-                        }
-                        indices.extend_from_slice(&[
-                            len + 0,
-                            len + 1,
-                            len + 2,
-                            len + 0,
-                            len + 2,
-                            len + 3,
-                        ]);
-                    }
+                if block.is_air()
+                    || dyn_block.as_registry_block() == azalea::registry::Block::Water
+                    || dyn_block.as_registry_block() == azalea::registry::Block::Lava
+                {
+                    continue;
                 }
+
+                match block_state {
+                    Some(BlockRenderState::Variants(variants)) => {
+                        let variant = 'outer: {
+                            let block_props = dyn_block.as_property_list();
+                            for (states, variant) in variants {
+                                let mut matched = true;
+                                if states == "" {
+                                    break 'outer variant;
+                                }
+                                for state in states.split(',') {
+                                    let Some((name, value)) = state.split_once('=') else {
+                                        error!(
+                                            "could not find = in {}, states are: {:?}",
+                                            state, states
+                                        );
+                                        continue;
+                                    };
+                                    let prop = block_props.get(name);
+
+                                    if prop == Some(&value.to_string()) {
+                                        continue;
+                                    } else if prop == None {
+                                        error!("could not find prop {} in {:?}", name, block_props);
+                                    } else {
+                                        matched = false;
+                                        continue;
+                                    };
+                                }
+                                if matched {
+                                    break 'outer variant;
+                                }
+                            }
+
+                            &variants[0].1
+                        };
+
+                        let desc = match variant {
+                            Variant::Single(desc) => desc,
+                            Variant::Array(desc) => &desc[0],
+                        };
+
+                        let model = assets.get_block_model(&desc.model);
+
+                        match model {
+                            Some(model) => match model.elements() {
+                                Some(elements) => {
+                                    for element in elements {
+                                        for face in FACES {
+                                            let model_face = match face.dir {
+                                                Direction::Down => &element.faces.down,
+                                                Direction::Up => &element.faces.up,
+                                                Direction::North => &element.faces.north,
+                                                Direction::South => &element.faces.south,
+                                                Direction::West => &element.faces.west,
+                                                Direction::East => &element.faces.east,
+                                            };
+
+                                            match model_face {
+                                                Some(model_face) => {
+                                                    let len = vertices.len() as u16;
+
+                                                    let normal = face.dir.inormal();
+                                                    let neighbor = BlockPos::new(
+                                                        x + normal.x,
+                                                        y + normal.y,
+                                                        z + normal.z,
+                                                    );
+
+                                                    if model_face.cullface.is_some()
+                                                        && update
+                                                            .get_block(neighbor, pos.y as usize)
+                                                            .is_some_and(|b| b.is_shape_full())
+                                                    {
+                                                        continue;
+                                                    }
+
+                                                    for offset in face.offsets {
+                                                        let tex_idx = model
+                                                            .get_texture(&model_face.texture)
+                                                            .map(|name| {
+                                                                let tex_idx =
+                                                                    assets.get_texture_id(&name);
+
+                                                                if tex_idx.is_none(){
+                                                                    error!("failed getting texture index for {}", name)
+                                                                }
+
+                                                                tex_idx
+                                                            })
+                                                            .flatten();
+
+                                                        vertices.push(Vertex {
+                                                            position: (offset_to_coord(
+                                                                offset, element,
+                                                            ) / 16.0
+                                                                + glam::Vec3::new(
+                                                                    x as f32, y as f32, z as f32,
+                                                                ))
+                                                            .into(),
+                                                            ao: if model.ambient_occlusion {
+                                                                compute_ao(
+                                                                    block_pos,
+                                                                    pos.y as usize,
+                                                                    offset,
+                                                                    normal,
+                                                                    update,
+                                                                )
+                                                            } else {
+                                                                3
+                                                            },
+                                                            tex_idx: tex_idx.unwrap_or(0) as u32,
+                                                        });
+                                                    }
+                                                    indices.extend_from_slice(&[
+                                                        len + 0,
+                                                        len + 1,
+                                                        len + 2,
+                                                        len + 0,
+                                                        len + 2,
+                                                        len + 3,
+                                                    ]);
+                                                }
+                                                None => {}
+                                            }
+                                        }
+                                    }
+                                }
+                                _ => {}
+                            },
+                            None => error!("could not get model: {}", desc.model),
+                        }
+                    }
+                    Some(BlockRenderState::MultiPart) => {}
+                    None => error!("Block state does not exist for block {}", dyn_block.id()),
+                }
+
+                if !block.is_air() {}
             }
         }
     }
@@ -140,6 +269,26 @@ pub fn mesh_section(
         indices,
         vertices,
     }
+}
+
+fn offset_to_coord(offset: IVec3, element: &Cube) -> glam::Vec3 {
+    glam::Vec3::new(
+        if offset.x == 0 {
+            element.from.x
+        } else {
+            element.to.x
+        },
+        if offset.y == 0 {
+            element.from.y
+        } else {
+            element.to.y
+        },
+        if offset.z == 0 {
+            element.from.z
+        } else {
+            element.to.z
+        },
+    )
 }
 
 fn compute_ao(

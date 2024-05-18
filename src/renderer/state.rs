@@ -20,7 +20,7 @@ impl<'a> State<'a> {
         let size = window.inner_size();
 
         let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
-            backends: wgpu::Backends::PRIMARY,
+            backends: wgpu::Backends::VULKAN,
             ..Default::default()
         });
 
@@ -39,8 +39,10 @@ impl<'a> State<'a> {
             .request_device(
                 &wgpu::DeviceDescriptor {
                     required_features: wgpu::Features::SPIRV_SHADER_PASSTHROUGH
-                        | wgpu::Features::POLYGON_MODE_LINE,
-                    required_limits: wgpu::Limits::default(),
+                        | wgpu::Features::POLYGON_MODE_LINE
+                        | wgpu::Features::TEXTURE_BINDING_ARRAY
+                        | wgpu::Features::SAMPLED_TEXTURE_AND_STORAGE_BUFFER_ARRAY_NON_UNIFORM_INDEXING ,
+                    required_limits: adapter.limits(),
                     label: None,
                 },
                 None, // Trace path

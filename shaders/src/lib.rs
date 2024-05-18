@@ -16,11 +16,13 @@ pub fn main_vs(
     #[spirv(vertex_id)] id: u32,
     #[spirv(position)] out_pos: &mut glam::Vec4,
 
-    in_pos: glam::IVec3,
+    in_pos: glam::Vec3,
     in_ao: u32,
+    tex_idx: u32,
 
     out_uv: &mut glam::Vec2,
     out_ao: &mut f32,
+    out_tex_idx: &mut u32,
 
     #[spirv(uniform, descriptor_set = 0, binding = 0)] world_uniform: &WorldUniform,
 
@@ -37,9 +39,9 @@ pub fn main_vs(
     const AO_TABLE: [f32; 4] = [0.1, 0.25, 0.4, 1.0];
 
     *out_uv = ID_TO_UV[vertex_id as usize];
-    *out_pos = world_uniform.view_proj
-        * (in_pos.as_vec3() + chunk_uniform.pos.as_vec3() * 16.0).extend(1.0);
+    *out_pos = world_uniform.view_proj * (in_pos + chunk_uniform.pos.as_vec3() * 16.0).extend(1.0);
     *out_ao = AO_TABLE[in_ao as usize];
+    *out_tex_idx = tex_idx;
 }
 
 #[spirv(fragment)]
@@ -48,9 +50,17 @@ pub fn main_fs(
 
     in_uv: glam::Vec2,
     in_ao: f32,
+    #[spirv(flat)] in_tex_idx: u32,
 
-    #[spirv(descriptor_set = 0, binding = 1)] texture: &Image!(2D, type=f32, sampled),
-    #[spirv(descriptor_set = 0, binding = 2)] sampler: &Sampler,
+    #[spirv(descriptor_set = 0, binding = 1)] textures: &RuntimeArray<
+        Image!(2D, type=f32, sampled),
+    >,
+    #[spirv(descriptor_set = 0, binding = 2)] samplers: &RuntimeArray<Sampler>,
 ) {
-    *out = texture.sample(*sampler, in_uv) * in_ao;
+    *out = unsafe {
+        textures
+            .index(in_tex_idx as usize)
+            .sample(*samplers.index(in_tex_idx as usize), in_uv)
+            * in_ao
+    };
 }

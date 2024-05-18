@@ -20,13 +20,56 @@ pub struct BlockModelRef<'a> {
     pub textures: &'a HashMap<String, String>,
     pub elements: &'a Option<Vec<Cube>>,
 
-    pub assets: &'a LoadedAssets,
+    assets: &'a LoadedAssets,
+}
+
+impl<'a> BlockModelRef<'a> {
+    pub fn elements(&self) -> Option<&'a Vec<Cube>> {
+        if let Some(elements) = self.elements {
+            Some(elements)
+        } else {
+            if let Some(parent) = &self.parent {
+                parent.elements()
+            } else {
+                None
+            }
+        }
+    }
+
+    pub fn get_texture(&self, name: &str) -> Option<String> {
+        self.get_texture_helper(self, name)
+    }
+
+    fn get_texture_helper(&self, top: &Self, name: &str) -> Option<String> {
+        let name = name.strip_prefix("minecraft:").unwrap_or(name);
+        let texture = if let Some(strip_name) = name.strip_prefix('#') {
+            self.textures
+                .get(strip_name)
+                .map(|n| top.get_texture_helper(top, n))
+                .unwrap_or_else(|| {
+                    self.parent
+                        .as_ref()
+                        .map(|parent| parent.get_texture_helper(top, name))
+                        .flatten()
+                })
+        } else {
+            Some(name.to_owned())
+        };
+
+        if texture.is_none() {
+            error!(
+                "could not load texture {}, from textures: {:?}",
+                name, self.textures
+            );
+        }
+        texture
+    }
 }
 
 pub struct LoadedAssets {
     texture_to_id: HashMap<String, usize>,
 
-    textures: Vec<Texture>,
+    pub textures: Vec<Texture>,
 
     block_models: HashMap<String, BlockModel>,
 
@@ -57,42 +100,48 @@ impl LoadedAssets {
                 continue;
             }
 
-            let mut name = "textures/".to_string();
-
-            name.push_str(
-                path.strip_prefix(&texture_path)
-                    .unwrap()
-                    .with_extension("")
-                    .to_str()
-                    .unwrap(),
-            );
+            let name = path
+                .strip_prefix(&texture_path)
+                .unwrap()
+                .with_extension("")
+                .to_str()
+                .unwrap()
+                .to_owned();
             this.add_texture(
                 Texture::new(device, queue, BufReader::new(fs::File::open(path).unwrap())).unwrap(),
                 name,
             );
         }
 
-        let model_path = path.join("models");
-        for path in walkdir::WalkDir::new(&model_path) {
+        let block_model_path = path.join("models/block");
+        for path in walkdir::WalkDir::new(&block_model_path) {
             let path = path.unwrap().path().to_owned();
 
             if !path.is_file() || !path.extension().map_or(false, |e| e == "json") {
                 continue;
             }
 
-            let mut name = "models/".to_string();
             info!(
                 "adding model: {}, from path: {}",
                 path.to_str().unwrap(),
-                model_path.to_string_lossy()
+                block_model_path.to_string_lossy()
             );
-            name.push_str(path.strip_prefix(&model_path).unwrap().to_str().unwrap());
+            let mut name = "block/".to_string();
+
+            name.push_str(
+                path.strip_prefix(&block_model_path)
+                    .unwrap()
+                    .with_extension("")
+                    .to_str()
+                    .unwrap(),
+            );
 
             let s = fs::read_to_string(path).unwrap();
             this.add_block_model(BlockModel::from_str(&s).unwrap(), name);
         }
 
         let block_state_path = path.join("blockstates");
+
         for path in walkdir::WalkDir::new(&block_state_path) {
             let path = path.unwrap().path().to_owned();
 
@@ -100,15 +149,11 @@ impl LoadedAssets {
                 continue;
             }
 
-            let mut name = "blockstates/".to_string();
-            info!(
-                "adding blockstate: {}, from path: {}\n",
-                path.to_str().unwrap(),
-                model_path.to_string_lossy()
-            );
+            let mut name = "block/".to_string();
             name.push_str(
                 path.strip_prefix(&block_state_path)
                     .unwrap()
+                    .with_extension("")
                     .to_str()
                     .unwrap(),
             );
@@ -142,6 +187,7 @@ impl LoadedAssets {
     }
 
     pub fn get_block_model<'a>(&'a self, name: &str) -> Option<BlockModelRef<'a>> {
+        let name = name.strip_prefix("minecraft:").unwrap_or(name);
         if let Some(block_model) = self.block_models.get(name) {
             let parent = block_model
                 .parent

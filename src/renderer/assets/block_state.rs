@@ -3,7 +3,8 @@ use serde::{de::IgnoredAny, Deserializer};
 #[derive(serde::Deserialize, Debug)]
 pub enum BlockRenderState {
     #[serde(rename = "variants")]
-    Variants(Variants),
+    #[serde(with = "tuple_vec_map")]
+    Variants(Vec<(String, Variant)>),
 
     #[serde(rename = "multipart", deserialize_with = "deserialize_multipart")]
     MultiPart,
@@ -26,8 +27,6 @@ impl BlockRenderState {
 #[derive(serde::Deserialize, Debug)]
 #[serde(untagged)]
 pub enum Variants {
-    Array(Vec<Variant>),
-    #[serde(with = "tuple_vec_map")]
     Map(Vec<(String, Variant)>),
 }
 
@@ -41,10 +40,15 @@ pub enum Variant {
 #[derive(serde::Deserialize, Debug)]
 pub struct VariantDesc {
     pub model: String,
+
     #[serde(default)]
-    pub y: i32,
+    #[serde(rename = "x")]
+    pub x_rotation: i32,
+
     #[serde(default)]
-    pub x: i32,
+    #[serde(rename = "y")]
+    pub y_rotation: i32,
+
     #[serde(default)]
     pub ublock: bool,
 }

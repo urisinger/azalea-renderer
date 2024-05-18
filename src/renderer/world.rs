@@ -1,7 +1,12 @@
-use std::{collections::HashMap, fs, io::BufReader, num::NonZeroU64};
+use std::{
+    collections::HashMap,
+    fs,
+    io::BufReader,
+    num::{NonZeroU32, NonZeroU64},
+};
 
 use super::{
-    assets::texture::Texture,
+    assets::{texture::Texture, LoadedAssets},
     chunk::{RenderChunk, Vertex},
     mesher::MeshUpdate,
 };
@@ -34,8 +39,6 @@ pub struct WorldRenderer {
     depth: Texture,
 
     world: World,
-
-    diffuse_texture: Texture,
 }
 
 impl WorldRenderer {
@@ -45,16 +48,11 @@ impl WorldRenderer {
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         config: &wgpu::SurfaceConfiguration,
+        assets: &LoadedAssets,
     ) -> Result<Self, image::ImageError> {
         let shader = unsafe {
             device.create_shader_module_spirv(&wgpu::include_spirv_raw!(env!("shaders.spv")))
         };
-
-        let diffuse_texture = Texture::new(
-            &device,
-            &queue,
-            BufReader::new(fs::File::open(env!("TEXTURE_PATH")).unwrap()),
-        )?;
 
         let world_uniform_buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("World Uniform"),
@@ -88,7 +86,7 @@ impl WorldRenderer {
                             view_dimension: wgpu::TextureViewDimension::D2,
                             sample_type: wgpu::TextureSampleType::Float { filterable: true },
                         },
-                        count: None,
+                        count: NonZeroU32::new(assets.textures.len() as u32),
                     },
                     wgpu::BindGroupLayoutEntry {
                         binding: 2,
@@ -96,7 +94,7 @@ impl WorldRenderer {
                         // This should match the filterable field of the
                         // corresponding Texture entry above.
                         ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
-                        count: None,
+                        count: NonZeroU32::new(assets.textures.len() as u32),
                     },
                 ],
                 label: Some("diffuse_bind_group_layout"),
@@ -116,6 +114,11 @@ impl WorldRenderer {
             label: None,
         });
 
+        let samplers: Vec<&wgpu::Sampler> = assets.textures.iter().map(|t| &t.sampler).collect();
+
+        let texture_views: Vec<&wgpu::TextureView> =
+            assets.textures.iter().map(|t| &t.view).collect();
+
         let global_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             layout: &texture_bind_group_layout,
             entries: &[
@@ -129,14 +132,14 @@ impl WorldRenderer {
                 },
                 wgpu::BindGroupEntry {
                     binding: 1,
-                    resource: wgpu::BindingResource::TextureView(&diffuse_texture.view),
+                    resource: wgpu::BindingResource::TextureViewArray(&texture_views),
                 },
                 wgpu::BindGroupEntry {
                     binding: 2,
-                    resource: wgpu::BindingResource::Sampler(&diffuse_texture.sampler),
+                    resource: wgpu::BindingResource::SamplerArray(&samplers),
                 },
             ],
-            label: Some("diffuse_bind_group"),
+            label: Some("global_bind_group"),
         });
 
         let render_pipeline_layout =
@@ -215,8 +218,6 @@ impl WorldRenderer {
             world_uniform,
             world_uniform_buffer,
             depth,
-
-            diffuse_texture,
         })
     }
 
