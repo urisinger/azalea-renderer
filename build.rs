@@ -2,8 +2,8 @@ use std::{env, io::Write, process::Command};
 
 fn main() {
     println!(
-        "cargo:rustc-env=TEXTURE_PATH={}",
-        "/home/uri_singer/Downloads/cobblestone.png"
+        "cargo:rustc-env=ASSETS_DIR={}",
+        "/home/uri_singer/Downloads/assets/minecraft/"
     );
 
     println!("cargo:rerun-if-changed=shaders/src/");

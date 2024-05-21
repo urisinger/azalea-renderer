@@ -48,7 +48,7 @@ impl<'a> Renderer<'a> {
         let assets = Arc::new(LoadedAssets::from_path(
             &state.device,
             &state.queue,
-            "/home/uri_singer/Downloads/assets/minecraft/",
+            env!("ASSETS_DIR"),
         ));
 
         let world_renderer = WorldRenderer::new(

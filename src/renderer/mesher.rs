@@ -12,7 +12,7 @@ use azalea::{
         direction::Direction,
         position::{ChunkSectionPos, Offset},
     },
-    physics::collision::BlockWithShape,
+    physics::collision::{BlockWithShape, Shapes, VoxelShape},
     BlockPos,
 };
 use glam::{IVec2, IVec3};
@@ -114,6 +114,8 @@ pub fn mesh_section(
 
                 let dyn_block = Box::<dyn Block>::from(block);
 
+                let shape = block.shape();
+
                 let block_state = assets.get_block_state(&format!("block/{}", dyn_block.id()));
 
                 match block_state {
@@ -178,17 +180,52 @@ pub fn mesh_section(
                                                     let len = vertices.len() as u16;
 
                                                     let normal = face.dir.inormal();
-                                                    let neighbor = BlockPos::new(
-                                                        x + normal.x,
-                                                        y + normal.y,
-                                                        z + normal.z,
-                                                    );
 
-                                                    if model_face.cullface.is_some()
-                                                        && update
-                                                            .get_block(neighbor, pos.y as usize)
-                                                            .is_some_and(|b| b.is_shape_full())
-                                                    {
+                                                    let cull_face = model_face
+                                                        .cullface
+                                                        .as_deref()
+                                                        .map(|s| match s {
+                                                            "down" => Some(Direction::Down),
+                                                            "up" => Some(Direction::Up),
+                                                            "north" => Some(Direction::North),
+                                                            "south" => Some(Direction::South),
+                                                            "west" => Some(Direction::West),
+                                                            "east" => Some(Direction::East),
+                                                            _ => {
+                                                                error!("Could not find cullface, make sure the assets folder is ok");
+                                                                None
+                                                            },
+                                                        }).flatten();
+
+                                                    if cull_face.is_some_and(|cull_face| {
+                                                        let cull_normal = cull_face.inormal();
+
+                                                        let cull_neighbor = BlockPos::new(
+                                                            x + cull_normal.x,
+                                                            y + cull_normal.y,
+                                                            z + cull_normal.z,
+                                                        );
+
+                                                        update
+                                                            .get_block(
+                                                                cull_neighbor,
+                                                                pos.y as usize,
+                                                            )
+                                                            .is_some_and(|b| {
+                                                                if !Box::<dyn Block>::from(b)
+                                                                    .behavior()
+                                                                    .opaque
+                                                                {
+                                                                    println!("hi");
+                                                                    return false;
+                                                                }
+                                                                !Shapes::matches_anywhere(
+                                                                    &shape,
+                                                                    &b.shape(),
+                                                                    |b1, b2| b1 && !b2,
+                                                                )
+                                                            })
+                                                    }) {
                                                         continue;
                                                     }
 
@@ -255,8 +292,6 @@ pub fn mesh_section(
                     Some(BlockRenderState::MultiPart) => {}
                     None => error!("Block state does not exist for block {}", dyn_block.id()),
                 }
-
-                if !block.is_air() {}
             }
         }
     }
