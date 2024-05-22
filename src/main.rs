@@ -2,8 +2,10 @@
 use azalea::pathfinder::goals::BlockPosGoal;
 use azalea::{prelude::*, BlockPos};
 use bevy_ecs::component::Component;
-use render_plugin::ChunkUpdate;
+use parking_lot::RwLock;
+use render_plugin::ChunkAdded;
 use renderer::Renderer;
+use std::sync::Arc;
 use std::time::Instant;
 use winit::window::CursorGrabMode;
 use winit::{
@@ -19,19 +21,13 @@ use log::*;
 mod render_plugin;
 mod renderer;
 
-async fn azlea_main(
-    main_updates: flume::Sender<ChunkUpdate>,
-    neighbor_updates: flume::Sender<ChunkUpdate>,
-) {
+async fn azlea_main(main_updates: flume::Sender<ChunkAdded>) {
     let account = Account::offline("bot");
 
     ClientBuilder::new()
         .set_handler(handle)
         .set_state(State::default())
-        .add_plugins(RenderPlugin {
-            main_updates,
-            neighbor_updates,
-        })
+        .add_plugins(RenderPlugin { main_updates })
         .start(account, "localhost:13157")
         .await
         .unwrap();
@@ -53,29 +49,25 @@ pub struct State;
 
 fn main() {
     let (main_sender, main_updates) = flume::unbounded();
-    let (neighbor_sender, neighbor_updates) = flume::unbounded();
 
     std::thread::spawn(move || {
         tokio::runtime::Builder::new_multi_thread()
             .enable_all()
             .build()
             .unwrap()
-            .block_on(azlea_main(main_sender, neighbor_sender))
+            .block_on(azlea_main(main_sender))
     });
     tokio::runtime::Builder::new_current_thread()
         .build()
         .unwrap()
-        .block_on(main_render(main_updates, neighbor_updates));
+        .block_on(main_render(main_updates));
 }
 
-async fn main_render(
-    main_updates: flume::Receiver<ChunkUpdate>,
-    neighbor_updates: flume::Receiver<ChunkUpdate>,
-) {
+async fn main_render(main_updates: flume::Receiver<ChunkAdded>) {
     let event_loop = EventLoop::new().unwrap();
     let window = WindowBuilder::new().build(&event_loop).unwrap();
 
-    let mut renderer = Renderer::new(&window, main_updates, neighbor_updates).await;
+    let mut renderer = Renderer::new(&window, main_updates).await;
 
     let mut last_render_time = Instant::now();
 

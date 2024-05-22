@@ -1,14 +1,10 @@
-use std::{array, time::Instant};
+use std::{array, sync::Arc, time::Instant};
 
 use azalea::{
     app::Plugin,
     chunks::ReceiveChunkEvent,
-    core::{
-        position::{ChunkPos, ChunkSectionBlockPos},
-        tick::GameTick,
-    },
-    world::Chunk,
-    BlockPos, InstanceHolder,
+    core::{position::ChunkPos, tick::GameTick},
+    InstanceHolder,
 };
 use bevy_ecs::{
     event::EventReader,
@@ -16,54 +12,28 @@ use bevy_ecs::{
     system::{Query, Resource},
 };
 
-use log::*;
+use parking_lot::RwLock;
 
 #[derive(Debug)]
-pub struct ChunkUpdate {
+pub struct ChunkAdded {
     pub pos: ChunkPos,
-    pub chunk: Chunk,
 
-    pub neighbers: [Option<Chunk>; 8],
-}
-
-impl ChunkUpdate {
-    //BlockPos is relative to the chunk
-    pub fn get_block(&self, pos: BlockPos, section_y: usize) -> Option<azalea::blocks::BlockState> {
-        let chunk_pos = ChunkPos::from(pos);
-        let y_offset = pos.y >> 4;
-
-        let pos = ChunkSectionBlockPos::from(pos);
-        if let Some(chunk_idx) = offset_to_index(chunk_pos) {
-            self.neighbers[chunk_idx].as_ref().map(|c| {
-                c.sections
-                    .get((section_y as i32 + y_offset) as usize)
-                    .map(|s| s.get(pos))
-            })?
-        } else {
-            self.chunk
-                .sections
-                .get((section_y as i32 + y_offset) as usize)
-                .map(|c| c.get(pos))
-        }
-    }
+    pub world: Arc<RwLock<azalea::world::Instance>>,
 }
 
 #[derive(Debug, Resource)]
 pub struct ChunkSender {
-    pub main_updates: flume::Sender<ChunkUpdate>,
-    pub neighbor_updates: flume::Sender<ChunkUpdate>,
+    pub main_updates: flume::Sender<ChunkAdded>,
 }
 
 pub struct RenderPlugin {
-    pub main_updates: flume::Sender<ChunkUpdate>,
-    pub neighbor_updates: flume::Sender<ChunkUpdate>,
+    pub main_updates: flume::Sender<ChunkAdded>,
 }
 
 impl Plugin for RenderPlugin {
     fn build(&self, app: &mut azalea::app::App) {
         app.insert_resource(ChunkSender {
             main_updates: self.main_updates.clone(),
-            neighbor_updates: self.neighbor_updates.clone(),
         })
         .add_systems(
             GameTick,
@@ -102,64 +72,21 @@ pub fn offset_to_index(offset: ChunkPos) -> Option<usize> {
 
 fn send_chunks_system(
     mut events: EventReader<ReceiveChunkEvent>,
-    query: Query<&InstanceHolder>,
     sender: bevy_ecs::system::Res<ChunkSender>,
+
+    query: Query<&mut InstanceHolder>,
 ) {
     for event in events.read() {
-        let start = Instant::now();
         let pos = ChunkPos::new(event.packet.x, event.packet.z);
 
         let local_player = query.get(event.entity).unwrap();
 
-        let instance = local_player.instance.read();
-
-        let neighbers = array::from_fn(|i| {
-            instance
-                .chunks
-                .get(&(pos + index_to_offset(i).expect("index should always be less then 8")))
-                .map(|c| c.read().clone())
-        });
-
-        //Send non urgent update(update to neighbor chunks)
-        neighbers
-            .iter()
-            .enumerate()
-            .filter_map(|(i, c)| c.as_ref().map(|c| (i, c)))
-            .for_each(|(i, c)| {
-                let pos = pos + index_to_offset(i).expect("index should always be less then 0");
-                let neighbers = array::from_fn(|i| {
-                    instance
-                        .chunks
-                        .get(
-                            &(pos
-                                + index_to_offset(i).expect("index should always be less then 8")),
-                        )
-                        .map(|c| c.read().clone())
-                });
-
-                sender
-                    .neighbor_updates
-                    .send(ChunkUpdate {
-                        pos,
-                        chunk: c.clone(),
-                        neighbers,
-                    })
-                    .unwrap();
-            });
-
-        if let Some(chunk) = instance.chunks.get(&pos) {
-            sender
-                .main_updates
-                .send(ChunkUpdate {
-                    pos,
-                    chunk: chunk.read().clone(),
-                    neighbers,
-                })
-                .unwrap();
-        } else {
-            error!("Expected chunk, but none found");
-        }
-
-        println!("Sending chunk took: {}", start.elapsed().as_secs_f32());
+        sender
+            .main_updates
+            .send(ChunkAdded {
+                pos,
+                world: local_player.instance.clone(),
+            })
+            .unwrap();
     }
 }

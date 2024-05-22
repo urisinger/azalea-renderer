@@ -1,27 +1,28 @@
 use std::{
-    any::Any,
-    ops::Deref,
     sync::Arc,
     thread::{self, JoinHandle},
     time::Instant,
 };
 
 use azalea::{
-    blocks::Block,
+    blocks::{Block, BlockState},
     core::{
         direction::Direction,
-        position::{ChunkSectionPos, Offset},
+        position::{ChunkSectionBlockPos, ChunkSectionPos, Offset},
     },
-    physics::collision::{BlockWithShape, Shapes, VoxelShape},
+    pathfinder::world::CachedWorld,
+    physics::collision::{BlockWithShape, Shapes},
+    world::ChunkStorage,
     BlockPos,
 };
-use glam::{IVec2, IVec3};
+use glam::IVec3;
+use parking_lot::RwLock;
 
-use crate::render_plugin::ChunkUpdate;
+use crate::render_plugin::ChunkAdded;
 
 use super::{
     assets::{
-        block_state::{BlockRenderState, Variant, VariantDesc, Variants},
+        block_state::{BlockRenderState, Variant},
         model::Cube,
         LoadedAssets,
     },
@@ -44,11 +45,7 @@ pub struct Mesher {
 }
 
 impl Mesher {
-    pub fn new(
-        main_updates: flume::Receiver<ChunkUpdate>,
-        neighbor_updates: flume::Receiver<ChunkUpdate>,
-        assets: Arc<LoadedAssets>,
-    ) -> Self {
+    pub fn new(main_updates: flume::Receiver<ChunkAdded>, assets: Arc<LoadedAssets>) -> Self {
         let (section_send, section_recv) = flume::unbounded();
 
         let chunk_thread = thread::spawn(move || loop {
@@ -56,31 +53,16 @@ impl Mesher {
                 for update in main_updates.try_iter() {
                     let time = Instant::now();
 
-                    for y in 0..update.chunk.sections.len() {
-                        let pos = ChunkSectionPos::new(update.pos.x, y as i32, update.pos.z);
+                    for y in (-64..=384).step_by(16) {
+                        let pos = ChunkSectionPos::new(update.pos.x, y / 16 as i32, update.pos.z);
 
-                        let render_chunk = mesh_section(pos, &update, &assets);
+                        let render_chunk = mesh_section(pos, &update.world, &assets);
                         section_send
                             .send(render_chunk)
                             .expect("Client disconnected, panicing.");
                     }
 
                     info!("Meshing chunk took: {}", time.elapsed().as_secs_f32());
-                }
-
-                for update in neighbor_updates.try_iter() {
-                    for y in 0..update.chunk.sections.len() {
-                        let pos = ChunkSectionPos::new(update.pos.x, y as i32, update.pos.z);
-
-                        let render_chunk = mesh_section(pos, &update, &assets);
-                        section_send
-                            .send(render_chunk)
-                            .expect("Client disconnected, panicing.");
-                    }
-
-                    if !main_updates.is_empty() {
-                        break;
-                    }
                 }
             }
         });
@@ -98,7 +80,7 @@ impl Mesher {
 
 pub fn mesh_section(
     pos: ChunkSectionPos,
-    update: &ChunkUpdate,
+    chunks: &RwLock<azalea::world::Instance>,
     assets: &LoadedAssets,
 ) -> MeshUpdate {
     let mut vertices = Vec::new();
@@ -108,9 +90,16 @@ pub fn mesh_section(
     for y in 0..16 {
         for x in 0..16 {
             for z in 0..16 {
-                let block_pos = BlockPos::new(x, y, z);
+                let block_pos = pos + ChunkSectionBlockPos::new(x, y, z);
 
-                let block = update.get_block(block_pos, pos.y as usize).unwrap();
+                let block = match chunks.read().get_block_state(&block_pos) {
+                    Some(block) => block,
+                    None => continue,
+                };
+
+                if block.is_air() {
+                    continue;
+                }
 
                 let dyn_block = Box::<dyn Block>::from(block);
 
@@ -201,24 +190,14 @@ pub fn mesh_section(
                                                         let cull_normal = cull_face.inormal();
 
                                                         let cull_neighbor = BlockPos::new(
-                                                            x + cull_normal.x,
-                                                            y + cull_normal.y,
-                                                            z + cull_normal.z,
+                                                            block_pos.x + cull_normal.x,
+                                                            block_pos.y + cull_normal.y,
+                                                            block_pos.z + cull_normal.z,
                                                         );
-
-                                                        update
-                                                            .get_block(
-                                                                cull_neighbor,
-                                                                pos.y as usize,
-                                                            )
+                                                        chunks
+                                                            .read()
+                                                            .get_block_state(&cull_neighbor)
                                                             .is_some_and(|b| {
-                                                                if !Box::<dyn Block>::from(b)
-                                                                    .behavior()
-                                                                    .opaque
-                                                                {
-                                                                    println!("hi");
-                                                                    return false;
-                                                                }
                                                                 !Shapes::matches_anywhere(
                                                                     &shape,
                                                                     &b.shape(),
@@ -257,11 +236,8 @@ pub fn mesh_section(
                                                             .into(),
                                                             ao: if model.ambient_occlusion {
                                                                 compute_ao(
-                                                                    block_pos,
-                                                                    pos.y as usize,
-                                                                    *offset,
-                                                                    normal,
-                                                                    update,
+                                                                    block_pos, *offset, normal,
+                                                                    chunks,
                                                                 )
                                                             } else {
                                                                 3
@@ -406,83 +382,48 @@ fn offset_to_coord(offset: IVec3, element: &Cube) -> glam::Vec3 {
 
 fn compute_ao(
     pos: BlockPos,
-    section_y: usize,
     offset: glam::IVec3,
     face_normal: Offset,
-    update: &ChunkUpdate,
+    chunks: &RwLock<azalea::world::Instance>,
 ) -> u32 {
-    let ao = if face_normal.x != 0 {
-        let side1 = update
-            .get_block(
-                pos + BlockPos::new(offset.x * 2 - 1, 0, offset.z * 2 - 1),
-                section_y,
-            )
-            .is_some_and(|b| b.is_shape_full());
+    let sides = if face_normal.x != 0 {
+        let side1 = pos + BlockPos::new(offset.x * 2 - 1, 0, offset.z * 2 - 1);
 
-        let side2 = update
-            .get_block(
-                pos + BlockPos::new(offset.x * 2 - 1, offset.y * 2 - 1, 0),
-                section_y,
-            )
-            .is_some_and(|b| b.is_shape_full());
+        let side2 = pos + BlockPos::new(offset.x * 2 - 1, offset.y * 2 - 1, 0);
 
-        let corner = update
-            .get_block(
-                pos + BlockPos::new(offset.x * 2 - 1, offset.y * 2 - 1, offset.z * 2 - 1),
-                section_y,
-            )
-            .is_some_and(|b| b.is_shape_full());
+        let corner = pos + BlockPos::new(offset.x * 2 - 1, offset.y * 2 - 1, offset.z * 2 - 1);
 
-        ao(side1, side2, corner)
+        (side1, side2, corner)
     } else if face_normal.y != 0 {
-        let side1 = update
-            .get_block(
-                pos + BlockPos::new(0, offset.y * 2 - 1, offset.z * 2 - 1),
-                section_y,
-            )
-            .is_some_and(|b| b.is_shape_full());
+        let side1 = pos + BlockPos::new(0, offset.y * 2 - 1, offset.z * 2 - 1);
 
-        let side2 = update
-            .get_block(
-                pos + BlockPos::new(offset.x * 2 - 1, offset.y * 2 - 1, 0),
-                section_y,
-            )
-            .is_some_and(|b| b.is_shape_full());
+        let side2 = pos + BlockPos::new(offset.x * 2 - 1, offset.y * 2 - 1, 0);
 
-        let corner = update
-            .get_block(
-                pos + BlockPos::new(offset.x * 2 - 1, offset.y * 2 - 1, offset.z * 2 - 1),
-                section_y,
-            )
-            .is_some_and(|b| b.is_shape_full());
+        let corner = pos + BlockPos::new(offset.x * 2 - 1, offset.y * 2 - 1, offset.z * 2 - 1);
 
-        ao(side1, side2, corner)
+        (side1, side2, corner)
     } else {
-        let side1 = update
-            .get_block(
-                pos + BlockPos::new(0, offset.y * 2 - 1, offset.z * 2 - 1),
-                section_y,
-            )
-            .is_some_and(|b| b.is_shape_full());
+        let side1 = pos + BlockPos::new(0, offset.y * 2 - 1, offset.z * 2 - 1);
 
-        let side2 = update
-            .get_block(
-                pos + BlockPos::new(offset.x * 2 - 1, 0, offset.z * 2 - 1),
-                section_y,
-            )
-            .is_some_and(|b| b.is_shape_full());
+        let side2 = pos + BlockPos::new(offset.x * 2 - 1, 0, offset.z * 2 - 1);
 
-        let corner = update
-            .get_block(
-                pos + BlockPos::new(offset.x * 2 - 1, offset.y * 2 - 1, offset.z * 2 - 1),
-                section_y,
-            )
-            .is_some_and(|b| b.is_shape_full());
+        let corner = pos + BlockPos::new(offset.x * 2 - 1, offset.y * 2 - 1, offset.z * 2 - 1);
 
-        ao(side1, side2, corner)
+        (side1, side2, corner)
     };
+    let chunks = chunks.read();
 
-    ao
+    let side1 = chunks
+        .get_block_state(&sides.0)
+        .is_some_and(|b| !b.is_shape_empty());
+    let side2 = chunks
+        .get_block_state(&sides.1)
+        .is_some_and(|b| !b.is_shape_empty());
+    let corner = chunks
+        .get_block_state(&sides.2)
+        .is_some_and(|b| !b.is_shape_empty());
+
+    ao(side1, side2, corner)
 }
 
 fn ao(side1: bool, side2: bool, corner: bool) -> u32 {

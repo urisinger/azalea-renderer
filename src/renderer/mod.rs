@@ -1,5 +1,6 @@
 use std::{sync::Arc, time::Duration};
 
+use parking_lot::RwLock;
 use state::State;
 use winit::{
     event::{KeyEvent, WindowEvent},
@@ -7,7 +8,7 @@ use winit::{
     window::Window,
 };
 
-use crate::render_plugin::ChunkUpdate;
+use crate::render_plugin::ChunkAdded;
 
 use self::{
     assets::LoadedAssets,
@@ -39,11 +40,7 @@ pub struct Renderer<'a> {
 }
 
 impl<'a> Renderer<'a> {
-    pub async fn new(
-        window: &'a Window,
-        main_updates: flume::Receiver<ChunkUpdate>,
-        neighbor_updates: flume::Receiver<ChunkUpdate>,
-    ) -> Self {
+    pub async fn new(window: &'a Window, main_updates: flume::Receiver<ChunkAdded>) -> Self {
         let state = State::new_async(window).await;
         let assets = Arc::new(LoadedAssets::from_path(
             &state.device,
@@ -78,7 +75,7 @@ impl<'a> Renderer<'a> {
             projection,
             camera_controller,
 
-            mesher: Mesher::new(main_updates, neighbor_updates, assets.clone()),
+            mesher: Mesher::new(main_updates, assets.clone()),
 
             assets,
         }
