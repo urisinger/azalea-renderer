@@ -42,34 +42,6 @@ impl Plugin for RenderPlugin {
     }
 }
 
-pub fn index_to_offset(index: usize) -> Option<ChunkPos> {
-    match index {
-        0 => Some(ChunkPos { x: 0, z: -1 }),  // North
-        1 => Some(ChunkPos { x: 0, z: 1 }),   // South
-        2 => Some(ChunkPos { x: 1, z: 0 }),   // East
-        3 => Some(ChunkPos { x: -1, z: 0 }),  // West
-        4 => Some(ChunkPos { x: 1, z: -1 }),  // Northeast
-        5 => Some(ChunkPos { x: 1, z: 1 }),   // Southeast
-        6 => Some(ChunkPos { x: -1, z: 1 }),  // Southwest
-        7 => Some(ChunkPos { x: -1, z: -1 }), // Northwest
-        _ => None,
-    }
-}
-
-pub fn offset_to_index(offset: ChunkPos) -> Option<usize> {
-    match offset {
-        ChunkPos { x: 0, z: -1 } => Some(0),  // North
-        ChunkPos { x: 0, z: 1 } => Some(1),   // South
-        ChunkPos { x: 1, z: 0 } => Some(2),   // East
-        ChunkPos { x: -1, z: 0 } => Some(3),  // West
-        ChunkPos { x: 1, z: -1 } => Some(4),  // Northeast
-        ChunkPos { x: 1, z: 1 } => Some(5),   // Southeast
-        ChunkPos { x: -1, z: 1 } => Some(6),  // Southwest
-        ChunkPos { x: -1, z: -1 } => Some(7), // Northwest
-        _ => None,
-    }
-}
-
 fn send_chunks_system(
     mut events: EventReader<ReceiveChunkEvent>,
     sender: bevy_ecs::system::Res<ChunkSender>,

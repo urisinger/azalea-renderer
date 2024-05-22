@@ -1,22 +1,20 @@
 use std::{
+    array,
     sync::Arc,
     thread::{self, JoinHandle},
     time::Instant,
 };
 
 use azalea::{
-    blocks::{Block, BlockState},
+    blocks::Block,
     core::{
         direction::Direction,
-        position::{ChunkSectionBlockPos, ChunkSectionPos, Offset},
+        position::{ChunkBlockPos, ChunkPos, ChunkSectionBlockPos, ChunkSectionPos, Offset},
     },
-    pathfinder::world::CachedWorld,
     physics::collision::{BlockWithShape, Shapes},
-    world::ChunkStorage,
     BlockPos,
 };
 use glam::IVec3;
-use parking_lot::RwLock;
 
 use crate::render_plugin::ChunkAdded;
 
@@ -30,6 +28,58 @@ use super::{
 };
 
 use log::*;
+
+#[derive(Debug)]
+pub struct ChunkLocal {
+    pub chunk: azalea::world::Chunk,
+
+    pub neighbers: [Option<azalea::world::Chunk>; 8],
+}
+
+impl ChunkLocal {
+    //BlockPos is relative to the chunk
+    pub fn get_block(&self, pos: BlockPos) -> Option<azalea::blocks::BlockState> {
+        let chunk_pos = ChunkPos::from(pos);
+
+        let pos = ChunkBlockPos::from(pos);
+
+        if let Some(chunk_idx) = offset_to_index(chunk_pos) {
+            self.neighbers[chunk_idx]
+                .as_ref()
+                .map(|c| c.get(&pos, -64))?
+        } else {
+            self.chunk.get(&pos, -64)
+        }
+    }
+}
+
+pub fn index_to_offset(index: usize) -> Option<ChunkPos> {
+    match index {
+        0 => Some(ChunkPos { x: 0, z: -1 }),  // North
+        1 => Some(ChunkPos { x: 0, z: 1 }),   // South
+        2 => Some(ChunkPos { x: 1, z: 0 }),   // East
+        3 => Some(ChunkPos { x: -1, z: 0 }),  // West
+        4 => Some(ChunkPos { x: 1, z: -1 }),  // Northeast
+        5 => Some(ChunkPos { x: 1, z: 1 }),   // Southeast
+        6 => Some(ChunkPos { x: -1, z: 1 }),  // Southwest
+        7 => Some(ChunkPos { x: -1, z: -1 }), // Northwest
+        _ => None,
+    }
+}
+
+pub fn offset_to_index(offset: ChunkPos) -> Option<usize> {
+    match offset {
+        ChunkPos { x: 0, z: -1 } => Some(0),  // North
+        ChunkPos { x: 0, z: 1 } => Some(1),   // South
+        ChunkPos { x: 1, z: 0 } => Some(2),   // East
+        ChunkPos { x: -1, z: 0 } => Some(3),  // West
+        ChunkPos { x: 1, z: -1 } => Some(4),  // Northeast
+        ChunkPos { x: 1, z: 1 } => Some(5),   // Southeast
+        ChunkPos { x: -1, z: 1 } => Some(6),  // Southwest
+        ChunkPos { x: -1, z: -1 } => Some(7), // Northwest
+        _ => None,
+    }
+}
 
 pub struct MeshUpdate {
     pub pos: ChunkSectionPos,
@@ -50,13 +100,30 @@ impl Mesher {
 
         let chunk_thread = thread::spawn(move || loop {
             loop {
-                for update in main_updates.try_iter() {
+                for update in main_updates.iter() {
                     let time = Instant::now();
 
-                    for y in (-64..=384).step_by(16) {
+                    let local = {
+                        let world = update.world.read();
+                        ChunkLocal {
+                            chunk: world.chunks.get(&update.pos).unwrap().read().clone(),
+                            neighbers: array::from_fn(|i| {
+                                world
+                                    .chunks
+                                    .get(
+                                        &(update.pos
+                                            + index_to_offset(i)
+                                                .expect("index should always be less then 8")),
+                                    )
+                                    .map(|c| c.read().clone())
+                            }),
+                        }
+                    };
+
+                    for y in (-64..(320)).step_by(16) {
                         let pos = ChunkSectionPos::new(update.pos.x, y / 16 as i32, update.pos.z);
 
-                        let render_chunk = mesh_section(pos, &update.world, &assets);
+                        let render_chunk = mesh_section(pos, &local, &assets);
                         section_send
                             .send(render_chunk)
                             .expect("Client disconnected, panicing.");
@@ -80,7 +147,7 @@ impl Mesher {
 
 pub fn mesh_section(
     pos: ChunkSectionPos,
-    chunks: &RwLock<azalea::world::Instance>,
+    update: &ChunkLocal,
     assets: &LoadedAssets,
 ) -> MeshUpdate {
     let mut vertices = Vec::new();
@@ -90,16 +157,9 @@ pub fn mesh_section(
     for y in 0..16 {
         for x in 0..16 {
             for z in 0..16 {
-                let block_pos = pos + ChunkSectionBlockPos::new(x, y, z);
+                let block_pos = BlockPos::new(x, y + pos.y * 16, z);
 
-                let block = match chunks.read().get_block_state(&block_pos) {
-                    Some(block) => block,
-                    None => continue,
-                };
-
-                if block.is_air() {
-                    continue;
-                }
+                let block = update.get_block(block_pos).unwrap();
 
                 let dyn_block = Box::<dyn Block>::from(block);
 
@@ -194,16 +254,17 @@ pub fn mesh_section(
                                                             block_pos.y + cull_normal.y,
                                                             block_pos.z + cull_normal.z,
                                                         );
-                                                        chunks
-                                                            .read()
-                                                            .get_block_state(&cull_neighbor)
-                                                            .is_some_and(|b| {
-                                                                !Shapes::matches_anywhere(
-                                                                    &shape,
-                                                                    &b.shape(),
-                                                                    |b1, b2| b1 && !b2,
-                                                                )
-                                                            })
+
+                                                        update.get_block(cull_neighbor).is_some_and(
+                                                            |b| {
+                                                                !b.is_air()
+                                                                    && !Shapes::matches_anywhere(
+                                                                        &shape,
+                                                                        &b.shape(),
+                                                                        |b1, b2| b1 && !b2,
+                                                                    )
+                                                            },
+                                                        )
                                                     }) {
                                                         continue;
                                                     }
@@ -237,7 +298,7 @@ pub fn mesh_section(
                                                             ao: if model.ambient_occlusion {
                                                                 compute_ao(
                                                                     block_pos, *offset, normal,
-                                                                    chunks,
+                                                                    update,
                                                                 )
                                                             } else {
                                                                 3
@@ -380,50 +441,52 @@ fn offset_to_coord(offset: IVec3, element: &Cube) -> glam::Vec3 {
     )
 }
 
-fn compute_ao(
-    pos: BlockPos,
-    offset: glam::IVec3,
-    face_normal: Offset,
-    chunks: &RwLock<azalea::world::Instance>,
-) -> u32 {
-    let sides = if face_normal.x != 0 {
-        let side1 = pos + BlockPos::new(offset.x * 2 - 1, 0, offset.z * 2 - 1);
+fn compute_ao(pos: BlockPos, offset: glam::IVec3, face_normal: Offset, update: &ChunkLocal) -> u32 {
+    let ao = if face_normal.x != 0 {
+        let side1 = update
+            .get_block(pos + BlockPos::new(offset.x * 2 - 1, 0, offset.z * 2 - 1))
+            .is_some_and(|b| b.is_shape_full());
 
-        let side2 = pos + BlockPos::new(offset.x * 2 - 1, offset.y * 2 - 1, 0);
+        let side2 = update
+            .get_block(pos + BlockPos::new(offset.x * 2 - 1, offset.y * 2 - 1, 0))
+            .is_some_and(|b| b.is_shape_full());
 
-        let corner = pos + BlockPos::new(offset.x * 2 - 1, offset.y * 2 - 1, offset.z * 2 - 1);
+        let corner = update
+            .get_block(pos + BlockPos::new(offset.x * 2 - 1, offset.y * 2 - 1, offset.z * 2 - 1))
+            .is_some_and(|b| b.is_shape_full());
 
-        (side1, side2, corner)
+        ao(side1, side2, corner)
     } else if face_normal.y != 0 {
-        let side1 = pos + BlockPos::new(0, offset.y * 2 - 1, offset.z * 2 - 1);
+        let side1 = update
+            .get_block(pos + BlockPos::new(0, offset.y * 2 - 1, offset.z * 2 - 1))
+            .is_some_and(|b| b.is_shape_full());
 
-        let side2 = pos + BlockPos::new(offset.x * 2 - 1, offset.y * 2 - 1, 0);
+        let side2 = update
+            .get_block(pos + BlockPos::new(offset.x * 2 - 1, offset.y * 2 - 1, 0))
+            .is_some_and(|b| b.is_shape_full());
 
-        let corner = pos + BlockPos::new(offset.x * 2 - 1, offset.y * 2 - 1, offset.z * 2 - 1);
+        let corner = update
+            .get_block(pos + BlockPos::new(offset.x * 2 - 1, offset.y * 2 - 1, offset.z * 2 - 1))
+            .is_some_and(|b| b.is_shape_full());
 
-        (side1, side2, corner)
+        ao(side1, side2, corner)
     } else {
-        let side1 = pos + BlockPos::new(0, offset.y * 2 - 1, offset.z * 2 - 1);
+        let side1 = update
+            .get_block(pos + BlockPos::new(0, offset.y * 2 - 1, offset.z * 2 - 1))
+            .is_some_and(|b| b.is_shape_full());
 
-        let side2 = pos + BlockPos::new(offset.x * 2 - 1, 0, offset.z * 2 - 1);
+        let side2 = update
+            .get_block(pos + BlockPos::new(offset.x * 2 - 1, 0, offset.z * 2 - 1))
+            .is_some_and(|b| b.is_shape_full());
 
-        let corner = pos + BlockPos::new(offset.x * 2 - 1, offset.y * 2 - 1, offset.z * 2 - 1);
+        let corner = update
+            .get_block(pos + BlockPos::new(offset.x * 2 - 1, offset.y * 2 - 1, offset.z * 2 - 1))
+            .is_some_and(|b| b.is_shape_full());
 
-        (side1, side2, corner)
+        ao(side1, side2, corner)
     };
-    let chunks = chunks.read();
 
-    let side1 = chunks
-        .get_block_state(&sides.0)
-        .is_some_and(|b| !b.is_shape_empty());
-    let side2 = chunks
-        .get_block_state(&sides.1)
-        .is_some_and(|b| !b.is_shape_empty());
-    let corner = chunks
-        .get_block_state(&sides.2)
-        .is_some_and(|b| !b.is_shape_empty());
-
-    ao(side1, side2, corner)
+    ao
 }
 
 fn ao(side1: bool, side2: bool, corner: bool) -> u32 {
