@@ -10,13 +10,13 @@ use super::{
 };
 
 pub struct World {
-    chunks: HashMap<glam::IVec3, RenderChunk>,
+    chunks: Vec<(glam::IVec3, RenderChunk)>,
 }
 
 impl World {
     pub fn new() -> Self {
         Self {
-            chunks: HashMap::new(),
+            chunks: Vec::default(),
         }
     }
 }
@@ -44,7 +44,6 @@ impl WorldRenderer {
 
     pub fn new(
         device: &wgpu::Device,
-        queue: &wgpu::Queue,
         config: &wgpu::SurfaceConfiguration,
         assets: &LoadedAssets,
     ) -> Result<Self, image::ImageError> {
@@ -245,7 +244,7 @@ impl WorldRenderer {
             pos,
         );
 
-        self.world.chunks.insert(pos, render_chunk);
+        self.world.chunks.push((pos, render_chunk));
     }
 
     pub fn update(&mut self, queue: &wgpu::Queue) {

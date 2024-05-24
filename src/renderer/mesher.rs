@@ -99,38 +99,46 @@ impl Mesher {
         let (section_send, section_recv) = flume::unbounded();
 
         let chunk_thread = thread::spawn(move || loop {
-            loop {
-                for update in main_updates.iter() {
-                    let time = Instant::now();
+            for update in main_updates.iter() {
+                let time = Instant::now();
 
-                    let local = {
-                        let world = update.world.read();
-                        ChunkLocal {
-                            chunk: world.chunks.get(&update.pos).unwrap().read().clone(),
-                            neighbers: array::from_fn(|i| {
-                                world
-                                    .chunks
-                                    .get(
-                                        &(update.pos
-                                            + index_to_offset(i)
-                                                .expect("index should always be less then 8")),
-                                    )
-                                    .map(|c| c.read().clone())
-                            }),
-                        }
+                let local = {
+                    let world = update.world.read();
+                    let chunk = if let Some(chunk) = world.chunks.get(&update.pos) {
+                        chunk.read().clone()
+                    } else {
+                        error!("could not find chunk");
+                        continue;
                     };
-
-                    for y in (-64..(320)).step_by(16) {
-                        let pos = ChunkSectionPos::new(update.pos.x, y / 16 as i32, update.pos.z);
-
-                        let render_chunk = mesh_section(pos, &local, &assets);
-                        section_send
-                            .send(render_chunk)
-                            .expect("Client disconnected, panicing.");
+                    ChunkLocal {
+                        chunk,
+                        neighbers: array::from_fn(|i| {
+                            world
+                                .chunks
+                                .get(
+                                    &(update.pos
+                                        + index_to_offset(i)
+                                            .expect("index should always be less then 8")),
+                                )
+                                .map(|c| c.read().clone())
+                        }),
                     }
+                };
 
-                    info!("Meshing chunk took: {}", time.elapsed().as_secs_f32());
+                for y in (-64..(320)).step_by(16) {
+                    let pos = ChunkSectionPos::new(update.pos.x, y / 16 as i32, update.pos.z);
+
+                    let render_chunk = mesh_section(pos, &local, &assets);
+                    section_send
+                        .send(render_chunk)
+                        .expect("Client disconnected, panicing.");
                 }
+
+                info!(
+                    "Meshing chunk took: {}, with pos: {:?}",
+                    time.elapsed().as_secs_f32(),
+                    update.pos
+                );
             }
         });
 
@@ -150,8 +158,8 @@ pub fn mesh_section(
     update: &ChunkLocal,
     assets: &LoadedAssets,
 ) -> MeshUpdate {
-    let mut vertices = Vec::new();
-    let mut indices = Vec::new();
+    let mut vertices = Vec::with_capacity(1000);
+    let mut indices = Vec::with_capacity(1000);
 
     // Iterate over the chunk's blocks and generate mesh vertices
     for y in 0..16 {

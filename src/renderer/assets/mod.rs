@@ -121,11 +121,6 @@ impl LoadedAssets {
                 continue;
             }
 
-            info!(
-                "adding model: {}, from path: {}",
-                path.to_str().unwrap(),
-                block_model_path.to_string_lossy()
-            );
             let mut name = "block/".to_string();
 
             name.push_str(

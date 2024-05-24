@@ -48,13 +48,8 @@ impl<'a> Renderer<'a> {
             env!("ASSETS_DIR"),
         ));
 
-        let world_renderer = WorldRenderer::new(
-            &state.device,
-            &state.queue,
-            &state.main_window.config,
-            &assets,
-        )
-        .unwrap();
+        let world_renderer =
+            WorldRenderer::new(&state.device, &state.main_window.config, &assets).unwrap();
 
         let camera_controller = CameraController::new(15.0, 0.5);
 
@@ -113,14 +108,16 @@ impl<'a> Renderer<'a> {
     }
 
     pub fn update(&mut self, dt: Duration) {
-        for update in self.mesher.iter() {
-            self.world_renderer
-                .update_chunk(&self.state.device, &update);
-        }
         self.camera_controller.update_camera(&mut self.camera, dt);
         self.world_renderer
             .set_camera(self.projection.calc_matrix() * self.camera.calc_matrix());
         self.world_renderer.update(&self.state.queue);
+        for update in self.mesher.iter() {
+            self.world_renderer
+                .update_chunk(&self.state.device, &update);
+
+            println!("got chunk at pos: {:?}", update.pos);
+        }
     }
 
     pub fn render(&mut self) -> Result<(), wgpu::SurfaceError> {

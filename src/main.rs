@@ -1,5 +1,5 @@
 #![allow(dead_code)]
-use azalea::pathfinder::goals::BlockPosGoal;
+use azalea::pathfinder::goals::{BlockPosGoal, Goal};
 use azalea::{prelude::*, BlockPos};
 use bevy_ecs::component::Component;
 use parking_lot::RwLock;
@@ -37,6 +37,11 @@ async fn handle(bot: azalea::Client, event: azalea::Event, _state: State) -> any
     match event {
         azalea::Event::Chat(m) => {
             println!("{}", m.message().to_ansi());
+            bot.goto(BlockPosGoal(BlockPos {
+                x: -1000,
+                y: 64,
+                z: 10,
+            }))
         }
         _ => {}
     }

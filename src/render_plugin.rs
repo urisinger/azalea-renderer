@@ -46,7 +46,7 @@ fn send_chunks_system(
     mut events: EventReader<ReceiveChunkEvent>,
     sender: bevy_ecs::system::Res<ChunkSender>,
 
-    query: Query<&mut InstanceHolder>,
+    query: Query<&InstanceHolder>,
 ) {
     for event in events.read() {
         let pos = ChunkPos::new(event.packet.x, event.packet.z);
