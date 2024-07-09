@@ -1,3 +1,4 @@
+use bevy_ecs::system::Resource;
 use wgpu::PresentMode;
 use winit::window::Window;
 
@@ -9,14 +10,16 @@ pub struct WindowData<'a> {
     pub window: &'a Window,
 }
 
-pub struct State<'a> {
+#[derive(Debug, Resource)]
+pub struct State {
+    pub instance: wgpu::Instance,
     pub device: wgpu::Device,
     pub queue: wgpu::Queue,
-    pub main_window: WindowData<'a>,
+    //pub main_window: WindowData<'a>,
 }
 
-impl<'a> State<'a> {
-    pub async fn new_async(window: &'a Window) -> Self {
+impl State {
+    pub async fn new(window: &Window) -> Self {
         let size = window.inner_size();
 
         let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
@@ -78,12 +81,13 @@ impl<'a> State<'a> {
         surface.configure(&device, &config);
 
         Self {
-            main_window: WindowData {
-                surface,
-                config,
-                size,
-                window,
-            },
+            //main_window: WindowData {
+            //    surface,
+            //    config,
+            //    size,
+            //    window,
+            //},
+            instance,
             device,
             queue,
         }

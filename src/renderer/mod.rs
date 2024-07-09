@@ -1,148 +1,127 @@
-use std::{sync::Arc, time::Duration};
+use std::{
+    path::{Path, PathBuf},
+    sync::{
+        atomic::{AtomicI32, Ordering},
+        Arc,
+    },
+};
+
+//pub mod assets;
+//mod chunk;
+//mod mesher;
+//mod world;
+
+use azalea_client::{chunks::ReceiveChunkEvent, InstanceHolder};
+use azalea_core::{position::ChunkPos, tick::GameTick};
+
+use bevy::{
+    app::{App, Plugin, PluginGroup, Startup},
+    asset::{io::AssetSourceId, AssetServer, Handle},
+    ecs::{
+        event::EventReader,
+        system::{Commands, Query, Res, Resource},
+    },
+    log::LogPlugin,
+    render::texture::Image,
+    tasks::{
+        futures_lite::{FutureExt, StreamExt},
+        AsyncComputeTaskPool, Task,
+    },
+    time::TimePlugin,
+    utils::BoxedFuture,
+    DefaultPlugins,
+};
 
 use parking_lot::RwLock;
-use state::State;
-use winit::{
-    event::{KeyEvent, WindowEvent},
-    keyboard::PhysicalKey,
-    window::Window,
-};
 
-use crate::render_plugin::ChunkAdded;
+use log::*;
 
-use self::{
-    assets::LoadedAssets,
-    camera::{Camera, CameraController, Projection},
-    mesher::Mesher,
-    world::WorldRenderer,
-};
+#[derive(Debug)]
+pub struct ChunkAdded {
+    pub pos: ChunkPos,
 
-pub mod assets;
-mod camera;
-mod chunk;
-mod mesher;
-mod state;
-mod world;
-
-pub struct Renderer<'a> {
-    state: State<'a>,
-
-    world_renderer: WorldRenderer,
-
-    projection: Projection,
-    camera: Camera,
-
-    pub camera_controller: CameraController,
-
-    mesher: Mesher,
-
-    assets: Arc<LoadedAssets>,
+    pub world: Arc<RwLock<azalea_world::Instance>>,
 }
 
-impl<'a> Renderer<'a> {
-    pub async fn new(window: &'a Window, main_updates: flume::Receiver<ChunkAdded>) -> Self {
-        let state = State::new_async(window).await;
-        let assets = Arc::new(LoadedAssets::from_path(
-            &state.device,
-            &state.queue,
-            env!("ASSETS_DIR"),
-        ));
+#[derive(Debug, Resource)]
+pub struct ChunkSender {
+    pub main_updates: flume::Sender<ChunkAdded>,
+}
 
-        let world_renderer =
-            WorldRenderer::new(&state.device, &state.main_window.config, &assets).unwrap();
+pub struct RenderPlugin {
+    pub main_updates: flume::Sender<ChunkAdded>,
+}
 
-        let camera_controller = CameraController::new(15.0, 0.5);
-
-        let camera = Camera::new((0.0, 128.0, 0.0), 0.0f32.to_radians(), 0.0f32.to_radians());
-
-        let projection = Projection::new(
-            state.main_window.config.width,
-            state.main_window.config.height,
-            45.0f32.to_radians(),
-            0.1,
-            100.0,
-        );
-
-        Self {
-            state,
-            world_renderer,
-            camera,
-            projection,
-            camera_controller,
-
-            mesher: Mesher::new(main_updates, assets.clone()),
-
-            assets,
-        }
+impl Plugin for RenderPlugin {
+    fn build(&self, app: &mut App) {
+        app.insert_resource(ChunkSender {
+            main_updates: self.main_updates.clone(),
+        })
+        .add_plugins(
+            DefaultPlugins
+                .build()
+                .disable::<LogPlugin>()
+                .disable::<TimePlugin>(),
+        )
+        .add_systems(GameTick, send_chunks_system)
+        .add_systems(Startup, load_assets_system);
     }
+}
 
-    pub fn resize(&mut self, new_size: winit::dpi::PhysicalSize<u32>) {
-        self.state.resize(new_size);
-        self.world_renderer
-            .resize(&self.state.device, &self.state.main_window.config);
-        self.projection
-            .resize(new_size.width as f32, new_size.height as f32);
-    }
+#[derive(Resource)]
+pub struct TextureLoader(pub Task<Vec<Handle<Image>>>);
 
-    pub fn size(&self) -> winit::dpi::PhysicalSize<u32> {
-        self.state.main_window.size
-    }
+fn load_assets_system(mut commands: Commands, asset_server: Res<AssetServer>) {
+    let thread_pool = AsyncComputeTaskPool::get();
 
-    pub fn input(&mut self, event: &WindowEvent) -> bool {
-        match event {
-            WindowEvent::KeyboardInput {
-                event:
-                    KeyEvent {
-                        physical_key: PhysicalKey::Code(key),
-                        state,
-                        ..
-                    },
-                ..
-            } => self.camera_controller.process_keyboard(*key, *state),
-            WindowEvent::MouseWheel { delta, .. } => {
-                self.camera_controller.process_scroll(delta);
-                true
+    let server = asset_server.clone();
+    commands.insert_resource(TextureLoader(thread_pool.spawn(async move {
+        let mut images = Vec::new();
+        load_assets_task(server, "minecraft/textures".into(), &mut images).await;
+        images
+    })));
+}
+
+fn load_assets_task<'a>(
+    asset_server: AssetServer,
+    path: PathBuf,
+    images: &'a mut Vec<Handle<Image>>,
+) -> BoxedFuture<'a, ()> {
+    async move {
+        let source = asset_server.get_source(AssetSourceId::Default).unwrap();
+        let reader = source.reader();
+        if let Ok(mut stream) = reader.read_directory(Path::new(&path)).await {
+            while let Some(path) = stream.next().await {
+                let is_directory = reader.is_directory(&path).await.unwrap_or(false);
+                if is_directory {
+                    load_assets_task(asset_server.clone(), path, images).await
+                } else if path.extension().map(|e| e.to_str().unwrap()) == Some("png") {
+                    let handle = asset_server.load::<Image>(path);
+                    images.push(handle);
+                }
             }
-            _ => false,
         }
     }
+    .boxed()
+}
 
-    pub fn update(&mut self, dt: Duration) {
-        self.camera_controller.update_camera(&mut self.camera, dt);
-        self.world_renderer
-            .set_camera(self.projection.calc_matrix() * self.camera.calc_matrix());
-        self.world_renderer.update(&self.state.queue);
-        for update in self.mesher.iter() {
-            self.world_renderer
-                .update_chunk(&self.state.device, &update);
+fn send_chunks_system(
+    mut events: EventReader<ReceiveChunkEvent>,
+    sender: Res<ChunkSender>,
 
-            println!("got chunk at pos: {:?}", update.pos);
-        }
-    }
+    query: Query<&InstanceHolder>,
+) {
+    for event in events.read() {
+        let pos = ChunkPos::new(event.packet.x, event.packet.z);
 
-    pub fn render(&mut self) -> Result<(), wgpu::SurfaceError> {
-        let output = self.state.main_window.surface.get_current_texture()?;
+        let local_player = query.get(event.entity).unwrap();
 
-        let view = output
-            .texture
-            .create_view(&wgpu::TextureViewDescriptor::default());
-
-        let mut encoder =
-            self.state
-                .device
-                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                    label: Some("Main Render"),
-                });
-
-        self.world_renderer.draw(&mut encoder, &view);
-
-        self.state.queue.submit(std::iter::once(encoder.finish()));
-        output.present();
-
-        Ok(())
-    }
-
-    pub fn window(&self) -> &Window {
-        &self.state.main_window.window
+        sender
+            .main_updates
+            .send(ChunkAdded {
+                pos,
+                world: local_player.instance.clone(),
+            })
+            .unwrap();
     }
 }

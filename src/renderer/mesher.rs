@@ -5,15 +5,12 @@ use std::{
     time::Instant,
 };
 
-use azalea::{
-    blocks::Block,
-    core::{
-        direction::Direction,
-        position::{ChunkBlockPos, ChunkPos, ChunkSectionBlockPos, ChunkSectionPos, Offset},
-    },
-    physics::collision::{BlockWithShape, Shapes},
-    BlockPos,
+use azalea_block::Block;
+use azalea_core::{
+    direction::Direction,
+    position::{BlockPos, ChunkBlockPos, ChunkPos, ChunkSectionPos},
 };
+use azalea_physics::collision::{BlockWithShape, Shapes};
 use glam::IVec3;
 
 use crate::render_plugin::ChunkAdded;
@@ -31,14 +28,14 @@ use log::*;
 
 #[derive(Debug)]
 pub struct ChunkLocal {
-    pub chunk: azalea::world::Chunk,
+    pub chunk: azalea_world::Chunk,
 
-    pub neighbers: [Option<azalea::world::Chunk>; 8],
+    pub neighbers: [Option<azalea_world::Chunk>; 8],
 }
 
 impl ChunkLocal {
     //BlockPos is relative to the chunk
-    pub fn get_block(&self, pos: BlockPos) -> Option<azalea::blocks::BlockState> {
+    pub fn get_block(&self, pos: BlockPos) -> Option<azalea_block::BlockState> {
         let chunk_pos = ChunkPos::from(pos);
 
         let pos = ChunkBlockPos::from(pos);
@@ -110,6 +107,7 @@ impl Mesher {
                         error!("could not find chunk");
                         continue;
                     };
+
                     ChunkLocal {
                         chunk,
                         neighbers: array::from_fn(|i| {
@@ -178,7 +176,7 @@ pub fn mesh_section(
                 match block_state {
                     Some(BlockRenderState::Variants(variants)) => {
                         let variant = 'outer: {
-                            let block_props = dyn_block.as_property_list();
+                            let block_props = dyn_block.as_property_map();
                             for (states, variant) in variants {
                                 let mut matched = true;
                                 if states == "" {
@@ -236,7 +234,13 @@ pub fn mesh_section(
                                                 Some(model_face) => {
                                                     let len = vertices.len() as u16;
 
-                                                    let normal = face.dir.inormal();
+                                                    let normal = face.dir.normal();
+
+                                                    let normal = IVec3::new(
+                                                        normal.x.round() as i32,
+                                                        normal.y.round() as i32,
+                                                        normal.z.round() as i32,
+                                                    );
 
                                                     let cull_face = model_face
                                                         .cullface
@@ -255,12 +259,15 @@ pub fn mesh_section(
                                                         }).flatten();
 
                                                     if cull_face.is_some_and(|cull_face| {
-                                                        let cull_normal = cull_face.inormal();
+                                                        let cull_normal = cull_face.normal();
 
                                                         let cull_neighbor = BlockPos::new(
-                                                            block_pos.x + cull_normal.x,
-                                                            block_pos.y + cull_normal.y,
-                                                            block_pos.z + cull_normal.z,
+                                                            block_pos.x
+                                                                + cull_normal.x.round() as i32,
+                                                            block_pos.y
+                                                                + cull_normal.y.round() as i32,
+                                                            block_pos.z
+                                                                + cull_normal.z.round() as i32,
                                                         );
 
                                                         update.get_block(cull_neighbor).is_some_and(
@@ -449,7 +456,12 @@ fn offset_to_coord(offset: IVec3, element: &Cube) -> glam::Vec3 {
     )
 }
 
-fn compute_ao(pos: BlockPos, offset: glam::IVec3, face_normal: Offset, update: &ChunkLocal) -> u32 {
+fn compute_ao(
+    pos: BlockPos,
+    offset: glam::IVec3,
+    face_normal: glam::IVec3,
+    update: &ChunkLocal,
+) -> u32 {
     let ao = if face_normal.x != 0 {
         let side1 = update
             .get_block(pos + BlockPos::new(offset.x * 2 - 1, 0, offset.z * 2 - 1))

@@ -1,74 +1,24 @@
 #![allow(dead_code)]
-use azalea::pathfinder::goals::{BlockPosGoal, Goal};
-use azalea::{prelude::*, BlockPos};
-use bevy_ecs::component::Component;
-use parking_lot::RwLock;
-use render_plugin::ChunkAdded;
-use renderer::Renderer;
-use std::sync::Arc;
-use std::time::Instant;
-use winit::window::CursorGrabMode;
-use winit::{
-    event::{DeviceEvent, ElementState, Event, KeyEvent, WindowEvent},
-    event_loop::EventLoop,
-    keyboard::{KeyCode, PhysicalKey},
-    window::WindowBuilder,
-};
+use azalea_client::{Account, ClientBuilder};
+use renderer::RenderPlugin;
 
-use crate::render_plugin::RenderPlugin;
-use log::*;
-
-mod render_plugin;
 mod renderer;
-
-async fn azlea_main(main_updates: flume::Sender<ChunkAdded>) {
-    let account = Account::offline("bot");
-
-    ClientBuilder::new()
-        .set_handler(handle)
-        .set_state(State::default())
-        .add_plugins(RenderPlugin { main_updates })
-        .start(account, "localhost:13157")
-        .await
-        .unwrap();
-}
-
-async fn handle(bot: azalea::Client, event: azalea::Event, _state: State) -> anyhow::Result<()> {
-    match event {
-        azalea::Event::Chat(m) => {
-            println!("{}", m.message().to_ansi());
-            bot.goto(BlockPosGoal(BlockPos {
-                x: -1000,
-                y: 64,
-                z: 10,
-            }))
-        }
-        _ => {}
-    }
-
-    Ok(())
-}
-
-#[derive(Default, Clone, Component)]
-pub struct State;
 
 fn main() {
     let (main_sender, main_updates) = flume::unbounded();
 
-    std::thread::spawn(move || {
-        tokio::runtime::Builder::new_multi_thread()
-            .enable_all()
-            .build()
-            .unwrap()
-            .block_on(azlea_main(main_sender))
-    });
-    tokio::runtime::Builder::new_current_thread()
-        .build()
-        .unwrap()
-        .block_on(main_render(main_updates));
+    let account = Account::offline("bodt");
+    let address = azalea_protocol::ServerAddress::try_from("localhost:13157").unwrap();
+
+    ClientBuilder::new(&account, &address)
+        .add_plugins(RenderPlugin {
+            main_updates: main_sender,
+        })
+        .run()
+        .unwrap();
 }
 
-async fn main_render(main_updates: flume::Receiver<ChunkAdded>) {
+/*async fn main_render(main_updates: flume::Receiver<ChunkAdded>) {
     let event_loop = EventLoop::new().unwrap();
     let window = WindowBuilder::new().build(&event_loop).unwrap();
 
@@ -137,4 +87,4 @@ async fn main_render(main_updates: flume::Receiver<ChunkAdded>) {
             _ => {}
         })
         .unwrap();
-}
+}*/

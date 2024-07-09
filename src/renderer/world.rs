@@ -1,7 +1,4 @@
-use std::{
-    collections::HashMap,
-    num::{NonZeroU32, NonZeroU64},
-};
+use std::num::{NonZeroU32, NonZeroU64};
 
 use super::{
     assets::{texture::Texture, LoadedAssets},
@@ -27,7 +24,7 @@ pub struct WorldUniform {
     camera: [[f32; 4]; 4],
 }
 
-pub struct WorldRenderer {
+/*pub struct WorldRenderer {
     global_bind_group: wgpu::BindGroup,
     chunk_bind_layout: wgpu::BindGroupLayout,
 
@@ -37,7 +34,7 @@ pub struct WorldRenderer {
     depth: Texture,
 
     world: World,
-}
+}*/
 
 impl WorldRenderer {
     const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
