@@ -1,19 +1,17 @@
 #![allow(dead_code)]
 use azalea_client::{Account, ClientBuilder};
+use bevy_flycam::PlayerPlugin;
 use renderer::RenderPlugin;
 
 mod renderer;
 
 fn main() {
-    let (main_sender, main_updates) = flume::unbounded();
-
     let account = Account::offline("bodt");
     let address = azalea_protocol::ServerAddress::try_from("localhost:13157").unwrap();
 
     ClientBuilder::new(&account, &address)
-        .add_plugins(RenderPlugin {
-            main_updates: main_sender,
-        })
+        .add_plugins(RenderPlugin {})
+        .add_plugins(PlayerPlugin)
         .run()
         .unwrap();
 }

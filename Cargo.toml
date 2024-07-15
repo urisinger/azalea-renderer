@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-log = "0.4"
+trace = "0.1.7"
 bytemuck = { version = "1.15.0", features = ["derive"] }
 image = "0.25.1"
 thiserror = "1.0.59"
@@ -13,16 +13,17 @@ anyhow = "1.0.82"
 bevy = "0.13.2"
 winit = "0.30.0"
 tokio = "^1.36.0"
-azalea-client = {git = "https://github.com/urisinger/azalea-render-fork.git", features = []}
+azalea-client = {git = "https://github.com/urisinger/azalea-render-fork.git"}
 azalea-core = {git = "https://github.com/urisinger/azalea-render-fork.git"}
 azalea-world = {git = "https://github.com/urisinger/azalea-render-fork.git"}
 azalea-protocol = {git = "https://github.com/urisinger/azalea-render-fork.git"}
 azalea-physics = {git = "https://github.com/urisinger/azalea-render-fork.git"}
 azalea-block = {git = "https://github.com/urisinger/azalea-render-fork.git"}
-flume = "0.11.0"
+flume = {version = "0.11.0"}
 parking_lot = { version = "^0.12.1" }
 serde_json = "1.0"
 serde = "1.0"
 serde-tuple-vec-map = "1.0"
 serde_tuple = "0.5.0"
 walkdir = "2.5.0"
+bevy_flycam = "0.13.0"

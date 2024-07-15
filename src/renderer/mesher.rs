@@ -1,30 +1,23 @@
-use std::{
-    array,
-    sync::Arc,
-    thread::{self, JoinHandle},
-    time::Instant,
-};
+use std::{array, sync::Arc, time::Instant};
 
-use azalea_block::Block;
+use azalea_client::{chunks::ReceiveChunkEvent, InstanceHolder};
 use azalea_core::{
     direction::Direction,
     position::{BlockPos, ChunkBlockPos, ChunkPos, ChunkSectionPos},
+    tick::GameTick,
 };
-use azalea_physics::collision::{BlockWithShape, Shapes};
-use glam::IVec3;
-
-use crate::render_plugin::ChunkAdded;
-
-use super::{
-    assets::{
-        block_state::{BlockRenderState, Variant},
-        model::Cube,
-        LoadedAssets,
+use azalea_physics::collision::BlockWithShape;
+use bevy::{
+    prelude::*,
+    render::{
+        mesh::{Indices, PrimitiveTopology},
+        render_asset::RenderAssetUsages,
     },
-    chunk::Vertex,
+    tasks::AsyncComputeTaskPool,
 };
-
-use log::*;
+use bevy_flycam::FlyCam;
+use glam::IVec3;
+use parking_lot::RwLock;
 
 #[derive(Debug)]
 pub struct ChunkLocal {
@@ -78,281 +71,192 @@ pub fn offset_to_index(offset: ChunkPos) -> Option<usize> {
     }
 }
 
-pub struct MeshUpdate {
-    pub pos: ChunkSectionPos,
+#[derive(Debug)]
+pub struct ChunkAdded {
+    pub pos: ChunkPos,
 
-    pub indices: Vec<u16>,
-    pub vertices: Vec<Vertex>,
+    pub world: Arc<RwLock<azalea_world::Instance>>,
 }
 
-pub struct Mesher {
-    chunk_thread: JoinHandle<()>,
-
-    section_recv: flume::Receiver<MeshUpdate>,
+#[derive(Debug, Resource)]
+pub struct ChunkSender {
+    pub chunks_send: flume::Sender<ChunkAdded>,
 }
 
-impl Mesher {
-    pub fn new(main_updates: flume::Receiver<ChunkAdded>, assets: Arc<LoadedAssets>) -> Self {
-        let (section_send, section_recv) = flume::unbounded();
+#[derive(Debug, Resource)]
+pub struct MeshReciver {
+    pub mesh_recv: flume::Receiver<(Transform, Mesh)>,
+}
 
-        let chunk_thread = thread::spawn(move || loop {
-            for update in main_updates.iter() {
-                let time = Instant::now();
+pub struct ChunkMeshPlugin;
 
-                let local = {
-                    let world = update.world.read();
-                    let chunk = if let Some(chunk) = world.chunks.get(&update.pos) {
-                        chunk.read().clone()
-                    } else {
-                        error!("could not find chunk");
-                        continue;
-                    };
+impl Plugin for ChunkMeshPlugin {
+    fn build(&self, app: &mut App) {
+        let (chunks_send, chunks_recv) = flume::unbounded();
+        let (mesh_send, mesh_recv) = flume::unbounded();
+        app.add_systems(GameTick, send_chunks_system)
+            .add_systems(Update, (insert_mesh_system, test_system))
+            .insert_resource(MeshReciver { mesh_recv })
+            .insert_resource(ChunkSender { chunks_send });
 
-                    ChunkLocal {
-                        chunk,
-                        neighbers: array::from_fn(|i| {
-                            world
-                                .chunks
-                                .get(
-                                    &(update.pos
-                                        + index_to_offset(i)
-                                            .expect("index should always be less then 8")),
-                                )
-                                .map(|c| c.read().clone())
-                        }),
-                    }
-                };
+        let thread_pool = AsyncComputeTaskPool::get();
+        thread_pool
+            .spawn(create_meshes_task(chunks_recv, mesh_send))
+            .detach();
+    }
+}
 
-                for y in (-64..(320)).step_by(16) {
-                    let pos = ChunkSectionPos::new(update.pos.x, y / 16 as i32, update.pos.z);
+fn send_chunks_system(
+    mut events: EventReader<ReceiveChunkEvent>,
+    sender: Res<ChunkSender>,
 
-                    let render_chunk = mesh_section(pos, &local, &assets);
-                    section_send
-                        .send(render_chunk)
-                        .expect("Client disconnected, panicing.");
-                }
+    query: Query<&InstanceHolder>,
+) {
+    for event in events.read() {
+        let pos = ChunkPos::new(event.packet.x, event.packet.z);
 
-                info!(
-                    "Meshing chunk took: {}, with pos: {:?}",
-                    time.elapsed().as_secs_f32(),
-                    update.pos
-                );
-            }
+        let local_player = query.get(event.entity).unwrap();
+
+        sender
+            .chunks_send
+            .send(ChunkAdded {
+                pos,
+                world: local_player.instance.clone(),
+            })
+            .unwrap();
+    }
+}
+
+fn insert_mesh_system(
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    recv_meshes: Res<MeshReciver>,
+) {
+    for (transform, mesh) in recv_meshes.mesh_recv.try_iter() {
+        commands.spawn(MaterialMeshBundle {
+            mesh: meshes.add(mesh),
+            material: materials.add(StandardMaterial::from(Color::WHITE)),
+            transform,
+            ..Default::default()
         });
-
-        Self {
-            section_recv,
-            chunk_thread,
-        }
-    }
-
-    pub fn iter(&self) -> flume::TryIter<MeshUpdate> {
-        self.section_recv.try_iter()
     }
 }
 
-pub fn mesh_section(
-    pos: ChunkSectionPos,
-    update: &ChunkLocal,
-    assets: &LoadedAssets,
-) -> MeshUpdate {
-    let mut vertices = Vec::with_capacity(1000);
-    let mut indices = Vec::with_capacity(1000);
+fn test_system(cameras: Query<(&FlyCam, &mut Transform)>) {
+    for (camera, transform) in &cameras {
+        println!("{:?}", transform);
+    }
+}
+async fn create_meshes_task(
+    chunks_recv: flume::Receiver<ChunkAdded>,
+    mesh_send: flume::Sender<(Transform, Mesh)>,
+) {
+    while let Ok(update) = chunks_recv.recv_async().await {
+        let time = Instant::now();
+
+        let local = {
+            let world = update.world.read();
+            let chunk = if let Some(chunk) = world.chunks.get(&update.pos) {
+                chunk.read().clone()
+            } else {
+                error!("could not find chunk");
+                continue;
+            };
+
+            ChunkLocal {
+                chunk,
+                neighbers: array::from_fn(|i| {
+                    world
+                        .chunks
+                        .get(
+                            &(update.pos
+                                + index_to_offset(i).expect("index should always be less then 8")),
+                        )
+                        .map(|c| c.read().clone())
+                }),
+            }
+        };
+
+        for y in (-64..(320)).step_by(16) {
+            let pos = ChunkSectionPos::new(update.pos.x, y / 16 as i32, update.pos.z);
+
+            let render_chunk = mesh_section(pos, &local);
+            mesh_send
+                .send((
+                    Transform::from_xyz(
+                        (pos.x * 16) as f32,
+                        (pos.y * 16) as f32,
+                        (pos.z * 16) as f32,
+                    ),
+                    render_chunk,
+                ))
+                .expect("Client disconnected, panicing.");
+        }
+
+        info!(
+            "Meshing chunk took: {}, with pos: {:?}",
+            time.elapsed().as_secs_f32(),
+            update.pos
+        );
+    }
+}
+
+pub fn mesh_section(pos: ChunkSectionPos, update: &ChunkLocal) -> Mesh {
+    let mut vertices: Vec<[f32; 3]> = Vec::new();
+    let mut indices = Vec::new();
 
     // Iterate over the chunk's blocks and generate mesh vertices
+    //
     for y in 0..16 {
         for x in 0..16 {
             for z in 0..16 {
                 let block_pos = BlockPos::new(x, y + pos.y * 16, z);
 
-                let block = update.get_block(block_pos).unwrap();
+                if !update.get_block(block_pos).is_some_and(|b| b.is_air()) {
+                    for face in FACES {
+                        indices.extend_from_slice(&[
+                            vertices.len() as u16 + 0,
+                            vertices.len() as u16 + 1,
+                            vertices.len() as u16 + 2,
+                            vertices.len() as u16 + 0,
+                            vertices.len() as u16 + 2,
+                            vertices.len() as u16 + 3,
+                        ]);
+                        let normal = face.dir.normal();
+                        let normal = IVec3::new(
+                            normal.x.round() as i32,
+                            normal.y.round() as i32,
+                            normal.z.round() as i32,
+                        );
 
-                let dyn_block = Box::<dyn Block>::from(block);
+                        for offset in face.offsets {
+                            let neighbor = BlockPos::new(x + normal.x, y + normal.y, z + normal.z);
 
-                let shape = block.shape();
-
-                let block_state = assets.get_block_state(&format!("block/{}", dyn_block.id()));
-
-                match block_state {
-                    Some(BlockRenderState::Variants(variants)) => {
-                        let variant = 'outer: {
-                            let block_props = dyn_block.as_property_map();
-                            for (states, variant) in variants {
-                                let mut matched = true;
-                                if states == "" {
-                                    break 'outer variant;
-                                }
-                                for state in states.split(',') {
-                                    let Some((name, value)) = state.split_once('=') else {
-                                        error!(
-                                            "could not find = in {}, states are: {:?}",
-                                            state, states
-                                        );
-                                        continue;
-                                    };
-                                    let prop = block_props.get(name);
-
-                                    if prop == Some(&value.to_string()) {
-                                        continue;
-                                    } else if prop == None {
-                                        error!("could not find prop {} in {:?}", name, block_props);
-                                    } else {
-                                        matched = false;
-                                        continue;
-                                    };
-                                }
-                                if matched {
-                                    break 'outer variant;
-                                }
+                            if !update.get_block(neighbor).is_some_and(|b| b.is_air()) {
+                                continue;
                             }
 
-                            &variants[0].1
-                        };
-
-                        let desc = match variant {
-                            Variant::Single(desc) => desc,
-                            Variant::Array(desc) => &desc[0],
-                        };
-
-                        let model = assets.get_block_model(&desc.model);
-
-                        match model {
-                            Some(model) => match model.elements() {
-                                Some(elements) => {
-                                    for element in elements {
-                                        for face in FACES {
-                                            let model_face = match face.dir {
-                                                Direction::Down => &element.faces.down,
-                                                Direction::Up => &element.faces.up,
-                                                Direction::North => &element.faces.north,
-                                                Direction::South => &element.faces.south,
-                                                Direction::West => &element.faces.west,
-                                                Direction::East => &element.faces.east,
-                                            };
-
-                                            match model_face {
-                                                Some(model_face) => {
-                                                    let len = vertices.len() as u16;
-
-                                                    let normal = face.dir.normal();
-
-                                                    let normal = IVec3::new(
-                                                        normal.x.round() as i32,
-                                                        normal.y.round() as i32,
-                                                        normal.z.round() as i32,
-                                                    );
-
-                                                    let cull_face = model_face
-                                                        .cullface
-                                                        .as_deref()
-                                                        .map(|s| match s {
-                                                            "down" => Some(Direction::Down),
-                                                            "up" => Some(Direction::Up),
-                                                            "north" => Some(Direction::North),
-                                                            "south" => Some(Direction::South),
-                                                            "west" => Some(Direction::West),
-                                                            "east" => Some(Direction::East),
-                                                            _ => {
-                                                                error!("Could not find cullface, make sure the assets folder is ok");
-                                                                None
-                                                            },
-                                                        }).flatten();
-
-                                                    if cull_face.is_some_and(|cull_face| {
-                                                        let cull_normal = cull_face.normal();
-
-                                                        let cull_neighbor = BlockPos::new(
-                                                            block_pos.x
-                                                                + cull_normal.x.round() as i32,
-                                                            block_pos.y
-                                                                + cull_normal.y.round() as i32,
-                                                            block_pos.z
-                                                                + cull_normal.z.round() as i32,
-                                                        );
-
-                                                        update.get_block(cull_neighbor).is_some_and(
-                                                            |b| {
-                                                                !b.is_air()
-                                                                    && !Shapes::matches_anywhere(
-                                                                        &shape,
-                                                                        &b.shape(),
-                                                                        |b1, b2| b1 && !b2,
-                                                                    )
-                                                            },
-                                                        )
-                                                    }) {
-                                                        continue;
-                                                    }
-
-                                                    let uvs = generate_uv(face.dir, model_face.uv);
-                                                    for (i, offset) in
-                                                        face.offsets.iter().enumerate()
-                                                    {
-                                                        let tex_idx = model
-                                                            .get_texture(&model_face.texture)
-                                                            .map(|name| {
-                                                                let tex_idx =
-                                                                    assets.get_texture_id(&name);
-
-                                                                if tex_idx.is_none(){
-                                                                    error!("failed getting texture index for {}", name)
-                                                                }
-
-                                                                tex_idx
-                                                            })
-                                                            .flatten();
-
-                                                        vertices.push(Vertex {
-                                                            position: (offset_to_coord(
-                                                                *offset, element,
-                                                            ) / 16.0
-                                                                + glam::Vec3::new(
-                                                                    x as f32, y as f32, z as f32,
-                                                                ))
-                                                            .into(),
-                                                            ao: if model.ambient_occlusion {
-                                                                compute_ao(
-                                                                    block_pos, *offset, normal,
-                                                                    update,
-                                                                )
-                                                            } else {
-                                                                3
-                                                            },
-                                                            tex_idx: tex_idx.unwrap_or(0) as u32,
-                                                            uv: uvs[i].into(),
-                                                        });
-                                                    }
-                                                    indices.extend_from_slice(&[
-                                                        len + 0,
-                                                        len + 1,
-                                                        len + 2,
-                                                        len + 0,
-                                                        len + 2,
-                                                        len + 3,
-                                                    ]);
-                                                }
-                                                None => {}
-                                            }
-                                        }
-                                    }
-                                }
-                                _ => {}
-                            },
-                            None => error!("could not get model: {}", desc.model),
+                            vertices.push(
+                                (offset + glam::IVec3::new(x as i32, y as i32, z as i32))
+                                    .as_vec3()
+                                    .into(),
+                            );
                         }
                     }
-                    Some(BlockRenderState::MultiPart) => {}
-                    None => error!("Block state does not exist for block {}", dyn_block.id()),
                 }
             }
         }
     }
+    let mut mesh = Mesh::new(
+        PrimitiveTopology::TriangleList,
+        RenderAssetUsages::RENDER_WORLD,
+    );
 
-    MeshUpdate {
-        pos,
-        indices,
-        vertices,
-    }
+    mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, vertices);
+    mesh.insert_indices(Indices::U16(indices));
+
+    mesh
 }
 
 fn generate_uv(dir: Direction, uvs: Option<[f32; 4]>) -> [glam::Vec2; 4] {
@@ -434,26 +338,6 @@ fn generate_uv(dir: Direction, uvs: Option<[f32; 4]>) -> [glam::Vec2; 4] {
             ],
         },
     }
-}
-
-fn offset_to_coord(offset: IVec3, element: &Cube) -> glam::Vec3 {
-    glam::Vec3::new(
-        if offset.x == 0 {
-            element.from.x
-        } else {
-            element.to.x
-        },
-        if offset.y == 0 {
-            element.from.y
-        } else {
-            element.to.y
-        },
-        if offset.z == 0 {
-            element.from.z
-        } else {
-            element.to.z
-        },
-    )
 }
 
 fn compute_ao(
